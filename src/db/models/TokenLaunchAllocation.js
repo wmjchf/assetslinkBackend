@@ -1,21 +1,7 @@
 import { DataTypes, Model } from "sequelize";
-import { getSequelize } from "../sequelize";
+import { getSequelize } from "../sequelize.js";
 
-export type TokenLaunchAllocationType = "immediate" | "creator_remaining";
-
-export class TokenLaunchAllocation extends Model {
-  declare id: number;
-  declare chainId: number;
-  declare txHash: string;
-  declare tokenAddress: string;
-  declare toAddress: string;
-  declare amount: string; // uint256 decimal string
-  declare label?: string;
-  declare allocationType: TokenLaunchAllocationType;
-  declare allocIndex: number; // stable order in calldata (or 999999 for remaining)
-  declare createdAt: Date;
-  declare updatedAt: Date;
-}
+export class TokenLaunchAllocation extends Model {}
 
 export function initTokenLaunchAllocationModel() {
   const sequelize = getSequelize();

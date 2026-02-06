@@ -1,24 +1,7 @@
 import { DataTypes, Model } from "sequelize";
-import { getSequelize } from "../sequelize";
+import { getSequelize } from "../sequelize.js";
 
-export class TokenLaunchVestingVault extends Model {
-  declare id: number;
-  declare chainId: number;
-  declare txHash: string;
-  declare tokenAddress: string;
-  declare vaultAddress: string;
-  declare beneficiary: string;
-  declare amount: string;
-  declare label?: string;
-  declare vestingStart?: string; // uint64 as decimal string
-  declare vestingCliffSeconds?: string; // uint64 as decimal string
-  declare vestingDurationSeconds?: string; // uint64 as decimal string
-  declare vestingIndex?: number;
-  declare blockNumber: number;
-  declare logIndex: number;
-  declare createdAt: Date;
-  declare updatedAt: Date;
-}
+export class TokenLaunchVestingVault extends Model {}
 
 export function initTokenLaunchVestingVaultModel() {
   const sequelize = getSequelize();

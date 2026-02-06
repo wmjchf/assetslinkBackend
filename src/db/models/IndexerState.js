@@ -1,13 +1,7 @@
 import { DataTypes, Model } from "sequelize";
-import { getSequelize } from "../sequelize";
+import { getSequelize } from "../sequelize.js";
 
-export class IndexerState extends Model {
-  declare id: number;
-  declare key: string;
-  declare lastBlock: number;
-  declare createdAt: Date;
-  declare updatedAt: Date;
-}
+export class IndexerState extends Model {}
 
 export function initIndexerStateModel() {
   const sequelize = getSequelize();

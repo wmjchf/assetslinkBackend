@@ -1,18 +1,7 @@
 import { DataTypes, Model } from "sequelize";
-import { getSequelize } from "../sequelize";
+import { getSequelize } from "../sequelize.js";
 
-export class TokenLaunchRecord extends Model {
-  declare id: number;
-  declare chainId: number;
-  declare factoryAddress: string;
-  declare creatorAddress: string;
-  declare txHash: string;
-  declare tokenAddress: string;
-  declare blockNumber: number;
-  declare logIndex: number;
-  declare createdAt: Date;
-  declare updatedAt: Date;
-}
+export class TokenLaunchRecord extends Model {}
 
 export function initTokenLaunchRecordModel() {
   const sequelize = getSequelize();

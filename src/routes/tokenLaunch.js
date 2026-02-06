@@ -1,43 +1,40 @@
-import Router from "koa-router";
-import type { Context } from "koa";
-import { ensureDb } from "../db/init";
-import { TokenLaunchRecord } from "../db/models/TokenLaunchRecord";
-import { TokenLaunchConfig } from "../db/models/TokenLaunchConfig";
-import { TokenLaunchVestingVault } from "../db/models/TokenLaunchVestingVault";
-import { TokenLaunchAllocation } from "../db/models/TokenLaunchAllocation";
-import { buildVaultReleaseCurve } from "../tokenLaunch/releaseCurve";
+import express from "express";
+import { ensureDb } from "../db/init.js";
+import { TokenLaunchRecord } from "../db/models/TokenLaunchRecord.js";
+import { TokenLaunchConfig } from "../db/models/TokenLaunchConfig.js";
+import { TokenLaunchVestingVault } from "../db/models/TokenLaunchVestingVault.js";
+import { TokenLaunchAllocation } from "../db/models/TokenLaunchAllocation.js";
+import { buildVaultReleaseCurve } from "../tokenLaunch/releaseCurve.js";
 import { isAddress } from "viem";
 
-const router = new Router();
+const router = express.Router();
 
-router.get("/api/token-launch/my-token", async (ctx: Context) => {
-  const addressParam = String(ctx.query.address || "").trim();
+router.get("/api/token-launch/my-token", async (req, res) => {
+  const addressParam = String(req.query.address || "").trim();
   const addressLower = addressParam.toLowerCase();
-  const chainIdFromQuery = Number(ctx.query.chainId || "0");
+  const chainIdFromQuery = Number(req.query.chainId || "0");
   const chainId = chainIdFromQuery > 0 ? chainIdFromQuery : null;
 
   if (!addressParam) {
-    ctx.status = 400;
-    ctx.body = {
+    res.status(400).json({
       error: "Missing address. Please provide ?address=0x... in the URL.",
       records: [],
-    };
+    });
     return;
   }
 
   if (!isAddress(addressParam)) {
-    ctx.status = 400;
-    ctx.body = {
+    res.status(400).json({
       error: "Invalid address.",
       records: [],
-    };
+    });
     return;
   }
 
   try {
     await ensureDb();
 
-    const whereClause: any = { creatorAddress: addressLower };
+    const whereClause = { creatorAddress: addressLower };
     if (chainId !== null) {
       whereClause.chainId = chainId;
     }
@@ -49,7 +46,7 @@ router.get("/api/token-launch/my-token", async (ctx: Context) => {
     });
 
     const txHashes = rows.map((r) => String(r.txHash).toLowerCase());
-    const cfgWhereClause: any = { txHash: txHashes };
+    const cfgWhereClause = { txHash: txHashes };
     if (chainId !== null) {
       cfgWhereClause.chainId = chainId;
     }
@@ -58,8 +55,8 @@ router.get("/api/token-launch/my-token", async (ctx: Context) => {
       ? await TokenLaunchConfig.findAll({ where: cfgWhereClause })
       : [];
 
-    const cfgByTx = new Map<string, { name: string; symbol: string }>();
-    for (const c of cfgRows as any[]) {
+    const cfgByTx = new Map();
+    for (const c of cfgRows) {
       cfgByTx.set(String(c.txHash).toLowerCase(), {
         name: String(c.name),
         symbol: String(c.symbol),
@@ -79,48 +76,45 @@ router.get("/api/token-launch/my-token", async (ctx: Context) => {
       };
     });
 
-    ctx.body = {
+    res.json({
       error: null,
       records,
-    };
-  } catch (e: any) {
+    });
+  } catch (e) {
     console.error("Failed to load My Tokens page data", e);
     const msg = e?.message || String(e);
-    ctx.status = 500;
-    ctx.body = {
+    res.status(500).json({
       error: `Failed to load data from server. Please try again later. (Debug: ${msg})`,
       records: [],
-    };
+    });
   }
 });
 
 // POST /api/token-launch/metadata - Update metadata (labels) for allocations and vestings
-router.post("/api/token-launch/metadata", async (ctx: Context) => {
+router.post("/api/token-launch/metadata", async (req, res) => {
   try {
     await ensureDb();
 
-    const body = ctx.request.body as any;
+    const body = req.body;
     const chainId = Number(body?.chainId || 0);
     const txHash = String(body?.txHash || "").toLowerCase();
 
     if (!chainId || !txHash.startsWith("0x") || txHash.length !== 66) {
-      ctx.status = 400;
-      ctx.body = { error: "Invalid chainId or txHash" };
+      res.status(400).json({ error: "Invalid chainId or txHash" });
       return;
     }
 
     // Only accept metadata for existing indexed records.
-    const rec = await TokenLaunchRecord.findOne({ where: { chainId, txHash } as any });
+    const rec = await TokenLaunchRecord.findOne({ where: { chainId, txHash } });
     if (!rec) {
-      ctx.status = 404;
-      ctx.body = { error: "Record not found yet. Please wait for the indexer and retry." };
+      res.status(404).json({ error: "Record not found yet. Please wait for the indexer and retry." });
       return;
     }
 
     const allocations = Array.isArray(body.allocations) ? body.allocations : [];
     const vestings = Array.isArray(body.vestings) ? body.vestings : [];
 
-    function normalizeLabel(s: any) {
+    function normalizeLabel(s) {
       const v = String(s ?? "").trim();
       if (!v) return null;
       return v.slice(0, 64);
@@ -132,8 +126,8 @@ router.post("/api/token-launch/metadata", async (ctx: Context) => {
       if (!Number.isInteger(idx) || idx < 0) continue;
       const label = normalizeLabel(a?.label);
       const [count] = await TokenLaunchAllocation.update(
-        { label } as any,
-        { where: { chainId, txHash, allocIndex: idx } as any }
+        { label },
+        { where: { chainId, txHash, allocIndex: idx } }
       );
       allocUpdated += Number(count || 0);
     }
@@ -144,36 +138,35 @@ router.post("/api/token-launch/metadata", async (ctx: Context) => {
       if (!Number.isInteger(idx) || idx < 0) continue;
       const label = normalizeLabel(v?.label);
       const [count] = await TokenLaunchVestingVault.update(
-        { label } as any,
-        { where: { chainId, txHash, vestingIndex: idx } as any }
+        { label },
+        { where: { chainId, txHash, vestingIndex: idx } }
       );
       vestUpdated += Number(count || 0);
     }
 
-    ctx.body = {
+    res.json({
       ok: true,
       chainId,
       txHash,
       allocationsUpdated: allocUpdated,
       vestingsUpdated: vestUpdated,
-    };
-  } catch (e: any) {
+    });
+  } catch (e) {
     console.error("Failed to update metadata", e);
-    ctx.status = 500;
-    ctx.body = { error: e?.message || "Internal server error" };
+    res.status(500).json({ error: e?.message || "Internal server error" });
   }
 });
 
 // GET /api/token-launch/records - Get token launch records with full details
-router.get("/api/token-launch/records", async (ctx: Context) => {
+router.get("/api/token-launch/records", async (req, res) => {
   try {
     await ensureDb();
 
-    const address = String(ctx.query.address || "").toLowerCase();
-    const tokenAddress = String(ctx.query.tokenAddress || "").toLowerCase();
-    const chainId = Number(ctx.query.chainId || "0");
+    const address = String(req.query.address || "").toLowerCase();
+    const tokenAddress = String(req.query.tokenAddress || "").toLowerCase();
+    const chainId = Number(req.query.chainId || "0");
 
-    const where: any = {};
+    const where = {};
     if (address) where.creatorAddress = address;
     if (tokenAddress) where.tokenAddress = tokenAddress;
     if (chainId) where.chainId = chainId;
@@ -188,20 +181,20 @@ router.get("/api/token-launch/records", async (ctx: Context) => {
     const [vaultRows, cfgRows, allocRows] = txHashes.length
       ? await Promise.all([
           TokenLaunchVestingVault.findAll({
-            where: { chainId: chainId || undefined, txHash: txHashes } as any,
+            where: { chainId: chainId || undefined, txHash: txHashes },
           }),
           TokenLaunchConfig.findAll({
-            where: { chainId: chainId || undefined, txHash: txHashes } as any,
+            where: { chainId: chainId || undefined, txHash: txHashes },
           }),
           TokenLaunchAllocation.findAll({
-            where: { chainId: chainId || undefined, txHash: txHashes } as any,
+            where: { chainId: chainId || undefined, txHash: txHashes },
             order: [["allocIndex", "ASC"]],
           }),
         ])
       : [[], [], []];
 
-    const vestingByTx = new Map<string, any[]>();
-    for (const v of vaultRows as any[]) {
+    const vestingByTx = new Map();
+    for (const v of vaultRows) {
       const k = String(v.txHash).toLowerCase();
       const arr = vestingByTx.get(k) || [];
       arr.push({
@@ -217,8 +210,8 @@ router.get("/api/token-launch/records", async (ctx: Context) => {
       vestingByTx.set(k, arr);
     }
 
-    const cfgByTx = new Map<string, any>();
-    for (const c of cfgRows as any[]) {
+    const cfgByTx = new Map();
+    for (const c of cfgRows) {
       cfgByTx.set(String(c.txHash).toLowerCase(), {
         name: String(c.name),
         symbol: String(c.symbol),
@@ -242,8 +235,8 @@ router.get("/api/token-launch/records", async (ctx: Context) => {
       });
     }
 
-    const allocByTx = new Map<string, any[]>();
-    for (const a of allocRows as any[]) {
+    const allocByTx = new Map();
+    for (const a of allocRows) {
       const k = String(a.txHash).toLowerCase();
       const arr = allocByTx.get(k) || [];
       arr.push({
@@ -256,7 +249,7 @@ router.get("/api/token-launch/records", async (ctx: Context) => {
       allocByTx.set(k, arr);
     }
 
-    ctx.body = {
+    res.json({
       records: rows.map((r) => ({
         id: String(r.id),
         chainId: r.chainId,
@@ -270,39 +263,36 @@ router.get("/api/token-launch/records", async (ctx: Context) => {
         vestingVaultDetails: vestingByTx.get(String(r.txHash).toLowerCase()) || [],
         createdAt: new Date(r.createdAt).getTime(),
       })),
-    };
-  } catch (e: any) {
+    });
+  } catch (e) {
     console.error("Failed to load records", e);
-    ctx.status = 500;
-    ctx.body = { error: e?.message || "Internal server error" };
+    res.status(500).json({ error: e?.message || "Internal server error" });
   }
 });
 
 // GET /api/token-launch/release-curve - Get vesting release curves for a token
-router.get("/api/token-launch/release-curve", async (ctx: Context) => {
+router.get("/api/token-launch/release-curve", async (req, res) => {
   try {
-    const tokenAddress = String(ctx.query.tokenAddress || "").trim();
-    const chainId = Number(ctx.query.chainId || "0");
+    const tokenAddress = String(req.query.tokenAddress || "").trim();
+    const chainId = Number(req.query.chainId || "0");
 
     if (!chainId || !Number.isFinite(chainId) || chainId <= 0) {
-      ctx.status = 400;
-      ctx.body = { error: "Invalid chainId" };
+      res.status(400).json({ error: "Invalid chainId" });
       return;
     }
     if (!isAddress(tokenAddress)) {
-      ctx.status = 400;
-      ctx.body = { error: "Invalid tokenAddress" };
+      res.status(400).json({ error: "Invalid tokenAddress" });
       return;
     }
 
     await ensureDb();
 
     const rows = await TokenLaunchVestingVault.findAll({
-      where: { chainId, tokenAddress: tokenAddress.toLowerCase() } as any,
+      where: { chainId, tokenAddress: tokenAddress.toLowerCase() },
       order: [["logIndex", "ASC"]],
     });
 
-    const vaults = (rows as any[]).map((v) => {
+    const vaults = rows.map((v) => {
       const points = buildVaultReleaseCurve({
         vaultAddress: String(v.vaultAddress),
         amount: String(v.amount),
@@ -325,16 +315,15 @@ router.get("/api/token-launch/release-curve", async (ctx: Context) => {
       };
     });
 
-    ctx.body = {
+    res.json({
       chainId,
       tokenAddress: tokenAddress.toLowerCase(),
       vaultCount: vaults.length,
       vaults,
-    };
-  } catch (e: any) {
+    });
+  } catch (e) {
     console.error("Failed to load release curve", e);
-    ctx.status = 500;
-    ctx.body = { error: e?.message || "Internal server error" };
+    res.status(500).json({ error: e?.message || "Internal server error" });
   }
 });
 

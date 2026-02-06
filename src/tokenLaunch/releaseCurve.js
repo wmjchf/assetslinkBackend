@@ -1,7 +1,4 @@
-export type ReleaseCurvePoint = { t: number; releasedRaw: string };
-export type VaultReleaseCurve = { vaultAddress: string; points: ReleaseCurvePoint[] };
-
-function safeBigInt(v: string | null | undefined) {
+function safeBigInt(v) {
   try {
     if (!v) return BigInt(0);
     return BigInt(v);
@@ -11,13 +8,7 @@ function safeBigInt(v: string | null | undefined) {
 }
 
 // Flow #1: linear vesting starts AFTER the cliff (no jump at cliff).
-function releasedAt(params: {
-  t: bigint;
-  start: bigint;
-  cliffSeconds: bigint;
-  durationSeconds: bigint;
-  amount: bigint;
-}) {
+function releasedAt(params) {
   const { t, start, cliffSeconds, durationSeconds, amount } = params;
   if (amount <= BigInt(0)) return BigInt(0);
   if (durationSeconds <= BigInt(0)) return BigInt(0);
@@ -36,17 +27,12 @@ function releasedAt(params: {
   return (amount * elapsedSinceCliff) / linearDuration;
 }
 
-function buildSampleTimes(params: {
-  start: bigint;
-  cliffSeconds: bigint;
-  durationSeconds: bigint;
-  maxPoints: number;
-}) {
+function buildSampleTimes(params) {
   const { start, cliffSeconds, durationSeconds, maxPoints } = params;
   const cliffTime = start + cliffSeconds;
   const endTime = start + durationSeconds;
 
-  const times: bigint[] = [];
+  const times = [];
   times.push(start);
   times.push(cliffTime);
   times.push(endTime);
@@ -74,14 +60,7 @@ function buildSampleTimes(params: {
   return uniq;
 }
 
-export function buildVaultReleaseCurve(params: {
-  vaultAddress: string;
-  amount: string | bigint;
-  vestingStart: string | bigint;
-  vestingCliffSeconds: string | bigint;
-  vestingDurationSeconds: string | bigint;
-  maxPoints?: number;
-}): VaultReleaseCurve {
+export function buildVaultReleaseCurve(params) {
   const amount = typeof params.amount === "bigint" ? params.amount : safeBigInt(String(params.amount));
   const start = typeof params.vestingStart === "bigint" ? params.vestingStart : safeBigInt(String(params.vestingStart));
   const cliffSeconds =

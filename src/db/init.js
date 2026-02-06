@@ -1,9 +1,9 @@
-import { getSequelize } from "./sequelize";
-import { initTokenLaunchRecordModel } from "./models/TokenLaunchRecord";
-import { initIndexerStateModel } from "./models/IndexerState";
-import { initTokenLaunchVestingVaultModel } from "./models/TokenLaunchVestingVault";
-import { initTokenLaunchConfigModel } from "./models/TokenLaunchConfig";
-import { initTokenLaunchAllocationModel } from "./models/TokenLaunchAllocation";
+import { getSequelize } from "./sequelize.js";
+import { initTokenLaunchRecordModel } from "./models/TokenLaunchRecord.js";
+import { initIndexerStateModel } from "./models/IndexerState.js";
+import { initTokenLaunchVestingVaultModel } from "./models/TokenLaunchVestingVault.js";
+import { initTokenLaunchConfigModel } from "./models/TokenLaunchConfig.js";
+import { initTokenLaunchAllocationModel } from "./models/TokenLaunchAllocation.js";
 import mysql from "mysql2/promise";
 
 let initialized = false;
@@ -69,7 +69,7 @@ async function dropLegacyVestingVaultsColumnIfExists() {
          AND COLUMN_NAME = 'vestingVaults'`,
       [info.database]
     );
-    const c = Number((rows as any[])?.[0]?.c || 0);
+    const c = Number(rows?.[0]?.c || 0);
     if (c > 0) {
       await conn.query(`ALTER TABLE token_launch_records DROP COLUMN vestingVaults`);
     }
@@ -106,7 +106,7 @@ async function ensureVestingVaultColumns() {
            AND COLUMN_NAME = ?`,
         [info.database, c.name]
       );
-      const count = Number((rows as any[])?.[0]?.c || 0);
+      const count = Number(rows?.[0]?.c || 0);
       if (count === 0) {
         await conn.query(
           `ALTER TABLE token_launch_vesting_vaults ADD COLUMN ${c.name} ${c.ddl}`
@@ -139,7 +139,7 @@ async function ensureAllocationColumns() {
            AND COLUMN_NAME = ?`,
         [info.database, c.name]
       );
-      const count = Number((rows as any[])?.[0]?.c || 0);
+      const count = Number(rows?.[0]?.c || 0);
       if (count === 0) {
         await conn.query(`ALTER TABLE token_launch_allocations ADD COLUMN ${c.name} ${c.ddl}`);
       }
@@ -159,7 +159,7 @@ export async function ensureDb() {
   const sequelize = getSequelize();
   try {
     await sequelize.authenticate();
-  } catch (e: any) {
+  } catch (e) {
     const code = e?.original?.code || e?.parent?.code || e?.code;
     if (code === "ER_BAD_DB_ERROR") {
       await ensureDatabaseExists();

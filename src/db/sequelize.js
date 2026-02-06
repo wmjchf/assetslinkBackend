@@ -32,7 +32,7 @@ function buildSequelize() {
   });
 }
 
-let sequelizeInstance: Sequelize | null = null;
+let sequelizeInstance = null;
 
 export function getSequelize() {
   if (!sequelizeInstance) {

@@ -1,35 +1,7 @@
 import { DataTypes, Model } from "sequelize";
-import { getSequelize } from "../sequelize";
+import { getSequelize } from "../sequelize.js";
 
-export class TokenLaunchConfig extends Model {
-  declare id: number;
-  declare chainId: number;
-  declare txHash: string;
-  declare tokenAddress: string;
-  declare factoryAddress: string;
-  declare creatorAddress: string;
-
-  declare name: string;
-  declare symbol: string;
-  declare totalSupplyRaw: string; // store uint256 as decimal string
-  declare marketingWallet: string;
-
-  declare buyMarketingBps: number;
-  declare buyLiquidityBps: number;
-  declare buyBurnBps: number;
-  declare sellMarketingBps: number;
-  declare sellLiquidityBps: number;
-  declare sellBurnBps: number;
-
-  declare maxGasPriceWei: string; // uint256 decimal string
-  declare deadBlocks: string; // uint256 decimal string
-  declare revertEarlyBuys: boolean;
-  declare maxTxAmount: string; // uint256 decimal string
-  declare maxWalletAmount: string; // uint256 decimal string
-
-  declare createdAt: Date;
-  declare updatedAt: Date;
-}
+export class TokenLaunchConfig extends Model {}
 
 export function initTokenLaunchConfigModel() {
   const sequelize = getSequelize();

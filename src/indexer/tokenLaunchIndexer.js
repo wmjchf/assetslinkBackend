@@ -1,11 +1,11 @@
 import "dotenv/config";
 import { createPublicClient, http, decodeEventLog, decodeFunctionData } from "viem";
-import { ensureDb } from "../db/init";
-import { IndexerState } from "../db/models/IndexerState";
-import { TokenLaunchRecord } from "../db/models/TokenLaunchRecord";
-import { TokenLaunchVestingVault } from "../db/models/TokenLaunchVestingVault";
-import { TokenLaunchConfig } from "../db/models/TokenLaunchConfig";
-import { TokenLaunchAllocation } from "../db/models/TokenLaunchAllocation";
+import { ensureDb } from "../db/init.js";
+import { IndexerState } from "../db/models/IndexerState.js";
+import { TokenLaunchRecord } from "../db/models/TokenLaunchRecord.js";
+import { TokenLaunchVestingVault } from "../db/models/TokenLaunchVestingVault.js";
+import { TokenLaunchConfig } from "../db/models/TokenLaunchConfig.js";
+import { TokenLaunchAllocation } from "../db/models/TokenLaunchAllocation.js";
 
 const TOKEN_FACTORY_EVENTS_ABI = [
   {
@@ -26,7 +26,7 @@ const TOKEN_FACTORY_EVENTS_ABI = [
       { indexed: false, name: "amount", type: "uint256" },
     ],
   },
-] as const;
+];
 
 const TOKEN_FACTORY_FUNCTIONS_ABI = [
   {
@@ -167,15 +167,15 @@ const TOKEN_FACTORY_FUNCTIONS_ABI = [
     ],
     outputs: [{ name: "tokenAddr", type: "address" }],
   },
-] as const;
+];
 
-function mustEnv(name: string) {
+function mustEnv(name) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);
   return v;
 }
 
-async function sleep(ms: number) {
+async function sleep(ms) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
@@ -189,7 +189,6 @@ async function main() {
 
   await ensureDb();
 
-  // eslint-disable-next-line no-console
   console.log(
     `[indexer] token-launch started | chainId=${chainId} factory=${factoryAddress} startBlock=${startBlock || "auto"} pollMs=${pollMs} batchBlocks=${batchBlocks}`
   );
@@ -201,7 +200,6 @@ async function main() {
   const key = `tokenFactory:${chainId}:${factoryAddress}`;
   let loopCount = 0;
 
-  // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
       loopCount++;
@@ -215,7 +213,6 @@ async function main() {
         // If no checkpoint and no start block, default to latest (avoid scanning from genesis)
         const checkpoint = latest;
         await IndexerState.upsert({ key, lastBlock: checkpoint });
-        // eslint-disable-next-line no-console
         console.log(
           `[indexer] no checkpoint/startBlock. Set checkpoint=${checkpoint}. (Set INDEXER_START_BLOCK to backfill history.)`
         );
@@ -231,13 +228,13 @@ async function main() {
       const to = Math.min(latest, from + batchBlocks);
 
       const logs = await client.getLogs({
-        address: factoryAddress as any,
+        address: factoryAddress,
         fromBlock: BigInt(from),
         toBlock: BigInt(to),
       });
 
       // Sort for deterministic processing
-      logs.sort((a: any, b: any) => {
+      logs.sort((a, b) => {
         if (a.blockNumber !== b.blockNumber) return Number(a.blockNumber - b.blockNumber);
         return (a.logIndex ?? 0) - (b.logIndex ?? 0);
       });
@@ -245,14 +242,14 @@ async function main() {
       let createdCount = 0;
       let vaultInserted = 0;
 
-      const decodedEvents: Array<{ log: any; decoded: any }> = [];
-      for (const l of logs as any[]) {
+      const decodedEvents = [];
+      for (const l of logs) {
         try {
           const decoded = decodeEventLog({
-            abi: TOKEN_FACTORY_EVENTS_ABI as any,
+            abi: TOKEN_FACTORY_EVENTS_ABI,
             data: l.data,
             topics: l.topics,
-          }) as any;
+          });
           decodedEvents.push({ log: l, decoded });
         } catch {
           // ignore
@@ -280,19 +277,19 @@ async function main() {
             tokenAddress: token,
             blockNumber,
             logIndex,
-          } as any,
+          },
         });
         if (isNew) createdCount++;
 
         // Decode tx calldata to store config + allocations (idempotent)
         try {
-          const tx = await client.getTransaction({ hash: txHash as any });
-          const input = String((tx as any)?.input || "");
+          const tx = await client.getTransaction({ hash: txHash });
+          const input = String(tx?.input || "");
           if (input && input !== "0x") {
             const decodedFn = decodeFunctionData({
-              abi: TOKEN_FACTORY_FUNCTIONS_ABI as any,
-              data: input as any,
-            }) as any;
+              abi: TOKEN_FACTORY_FUNCTIONS_ABI,
+              data: input,
+            });
 
             const fn = String(decodedFn?.functionName || "");
             const args = decodedFn?.args || [];
@@ -323,19 +320,19 @@ async function main() {
                 revertEarlyBuys: Boolean(limits?.revertEarlyBuys ?? true),
                 maxTxAmount: String(limits?.maxTxAmount ?? "0"),
                 maxWalletAmount: String(limits?.maxWalletAmount ?? "0"),
-              } as any,
+              },
             });
 
             // allocations (only for distribution functions)
-            const recipients: string[] =
+            const recipients =
               fn === "createTokenWithDistribution" || fn === "createTokenWithDistributionAndVesting"
                 ? (args?.[1] || [])
                 : [];
-            const amounts: any[] =
+            const amounts =
               fn === "createTokenWithDistribution" || fn === "createTokenWithDistributionAndVesting"
                 ? (args?.[2] || [])
                 : [];
-            const vestings: any[] = fn === "createTokenWithDistributionAndVesting" ? (args?.[3] || []) : [];
+            const vestings = fn === "createTokenWithDistributionAndVesting" ? (args?.[3] || []) : [];
 
             let sum = BigInt(0);
             for (let i = 0; i < recipients.length; i++) {
@@ -352,7 +349,7 @@ async function main() {
                   amount: amt.toString(),
                   allocationType: "immediate",
                   allocIndex: i,
-                } as any,
+                },
               });
             }
 
@@ -376,7 +373,7 @@ async function main() {
                   amount: remaining.toString(),
                   allocationType: "creator_remaining",
                   allocIndex: 999999,
-                } as any,
+                },
               });
             }
           }
@@ -409,7 +406,7 @@ async function main() {
             amount,
             blockNumber,
             logIndex,
-          } as any,
+          },
         });
         vaultInserted++;
       }
@@ -425,15 +422,15 @@ async function main() {
           )
         );
         for (const txHash of txHashesInBatch) {
-          const tx = await client.getTransaction({ hash: txHash as any });
-          const input = String((tx as any)?.input || "");
+          const tx = await client.getTransaction({ hash: txHash });
+          const input = String(tx?.input || "");
           if (!input || input === "0x") continue;
           const decodedFn = decodeFunctionData({
-            abi: TOKEN_FACTORY_FUNCTIONS_ABI as any,
-            data: input as any,
-          }) as any;
+            abi: TOKEN_FACTORY_FUNCTIONS_ABI,
+            data: input,
+          });
           if (decodedFn?.functionName !== "createTokenWithDistributionAndVesting") continue;
-          const vestings: any[] = decodedFn?.args?.[3] || [];
+          const vestings = decodedFn?.args?.[3] || [];
           if (!Array.isArray(vestings) || vestings.length === 0) continue;
 
           const txVestingEvents = decodedEvents
@@ -455,7 +452,7 @@ async function main() {
                 vestingCliffSeconds: String(vInput?.cliffSeconds ?? ""),
                 vestingDurationSeconds: String(vInput?.durationSeconds ?? ""),
                 vestingIndex: i,
-              } as any,
+              },
               { where: { chainId, txHash, vaultAddress: vaultAddr } }
             );
           }
@@ -468,13 +465,11 @@ async function main() {
 
       // Log progress: always when we found logs, otherwise every ~10 loops.
       if (logs.length > 0 || loopCount % 10 === 0) {
-        // eslint-disable-next-line no-console
         console.log(
           `[indexer] scanned ${from}..${to} logs=${logs.length} created=${createdCount} vestingInserted=${vaultInserted} checkpoint=${to}/${latest}`
         );
       }
     } catch (e) {
-      // eslint-disable-next-line no-console
       console.error("Indexer loop error:", e);
       await sleep(Math.min(30_000, pollMs * 2));
     }
@@ -484,7 +479,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  // eslint-disable-next-line no-console
   console.error(e);
   process.exit(1);
 });
