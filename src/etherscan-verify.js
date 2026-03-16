@@ -16,7 +16,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Hardhat build-info lives two levels up from backend/src/
 const BUILD_INFO_DIR = path.resolve(__dirname, "../../hardhat/artifacts/build-info");
-
+console.log(BUILD_INFO_DIR,'BUILD_INFO_DIR',__dirname);
 // Etherscan API V2: single endpoint, chainid= param selects the network.
 // Supported chainIds: https://docs.etherscan.io/v2-migration
 const ETHERSCAN_V2_URL = "https://api.etherscan.io/v2/api";
