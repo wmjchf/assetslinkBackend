@@ -209,7 +209,7 @@ async function main() {
       const state = await IndexerState.findOne({ where: { key } });
       const last = state?.lastBlock ?? 0;
       const from = Math.max(startBlock || 0, last > 0 ? last + 1 : 0);
-      console.log(key,'key11',state);
+      console.log(key,'key11',state?.lastBlock);
       if (from === 0) {
         // If no checkpoint and no start block, default to latest (avoid scanning from genesis)
         const checkpoint = latest;
