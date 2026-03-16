@@ -21,21 +21,49 @@ const BUILD_INFO_DIR = path.resolve(__dirname, "../hardhat/artifacts/build-info"
 const ETHERSCAN_V2_URL = "https://api.etherscan.io/v2/api";
 const SUPPORTED_CHAIN_IDS = new Set([1, 11155111, 8453, 84532, 56, 97, 42161, 10]);
 
-// Load the most-recent build-info JSON
+// The exact sources key Etherscan expects in the Standard JSON Input
+const CONTRACT_SOURCE_KEY = "contracts/launch/SafeLaunchToken.sol";
+
+// Scan all build-info files (newest first) and return the first one
+// that actually contains SafeLaunchToken.sol — avoids picking up stale
+// build-info files from other contracts (e.g. SafeLaunchTokenUpgradeable).
 function loadBuildInfo() {
-  try {
-    const files = fs
-      .readdirSync(BUILD_INFO_DIR)
-      .filter((f) => f.endsWith(".json"))
-      .map((f) => ({ f, mtime: fs.statSync(path.join(BUILD_INFO_DIR, f)).mtimeMs }))
-      .sort((a, b) => b.mtime - a.mtime);
-    if (!files.length) return null;
-    const raw = fs.readFileSync(path.join(BUILD_INFO_DIR, files[0].f), "utf8");
-    const data = JSON.parse(raw);
-    return { input: data.input, solcLongVersion: data.solcLongVersion };
-  } catch {
+  if (!fs.existsSync(BUILD_INFO_DIR)) {
+    console.error(`[etherscan-verify] BUILD_INFO_DIR not found: ${BUILD_INFO_DIR}`);
     return null;
   }
+
+  const files = fs
+    .readdirSync(BUILD_INFO_DIR)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => ({ f, mtime: fs.statSync(path.join(BUILD_INFO_DIR, f)).mtimeMs }))
+    .sort((a, b) => b.mtime - a.mtime);
+
+  if (!files.length) {
+    console.error(`[etherscan-verify] No build-info JSON files in: ${BUILD_INFO_DIR}`);
+    return null;
+  }
+
+  for (const { f } of files) {
+    try {
+      const data = JSON.parse(fs.readFileSync(path.join(BUILD_INFO_DIR, f), "utf8"));
+      if (data?.input?.sources?.[CONTRACT_SOURCE_KEY]) {
+        console.log(`[etherscan-verify] Using build-info: ${f}`);
+        return { input: data.input, solcLongVersion: data.solcLongVersion };
+      }
+    } catch {
+      // skip unreadable files
+    }
+  }
+
+  console.error(`[etherscan-verify] No build-info contains "${CONTRACT_SOURCE_KEY}". Available files:`);
+  files.forEach(({ f }) => {
+    try {
+      const keys = Object.keys(JSON.parse(fs.readFileSync(path.join(BUILD_INFO_DIR, f), "utf8"))?.input?.sources ?? {});
+      console.error(`  ${f}: ${keys.filter(k => k.startsWith("contracts/")).join(", ")}`);
+    } catch { /**/ }
+  });
+  return null;
 }
 
 // ABI-encode SafeLaunchToken constructor arguments
