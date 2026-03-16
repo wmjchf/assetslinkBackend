@@ -98,13 +98,10 @@ export async function verifyTokenOnEtherscan(chainId, tokenAddress, args) {
   if (!SUPPORTED_CHAIN_IDS.has(chainId)) {
     return { status: "skipped", message: `chainId ${chainId} not supported by Etherscan V2` };
   }
-console.log('one');
   const apiKey = process.env.ETHERSCAN_API_KEY;
   if (!apiKey) return { status: "skipped", message: "ETHERSCAN_API_KEY not set" };
-  console.log('tow');
   const buildInfo = loadBuildInfo();
   if (!buildInfo) return { status: "skipped", message: "build-info not found" };
-  console.log('three');
   const constructorArguments = encodeConstructorArgs(
     args.factoryAddress,
     args.name,
@@ -114,20 +111,20 @@ console.log('one');
     args.buyFeeBps,
     args.sellFeeBps
   );
-  console.log('four');
   // Wait for Etherscan to index the deployment before submitting verification.
   // Without this delay "Unable to locate ContractCode" is returned.
   const initialDelayMs = Number(process.env.ETHERSCAN_VERIFY_DELAY_MS ?? 30_000);
   await new Promise((r) => setTimeout(r, initialDelayMs));
-  console.log('five');
   // Retry submit up to 3 times in case Etherscan still hasn't indexed the contract.
   let guid;
   for (let attempt = 1; attempt <= 3; attempt++) {
+    console.log('one');
     try {
       guid = await submitVerification(
         chainId, apiKey, tokenAddress,
         buildInfo.input, buildInfo.solcLongVersion, constructorArguments
       );
+      console.log(guid,'guid');
       break;
     } catch (err) {
       const msg = String(err?.message || err);
