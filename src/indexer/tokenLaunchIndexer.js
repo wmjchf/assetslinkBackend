@@ -209,7 +209,7 @@ async function main() {
       const state = await IndexerState.findOne({ where: { key } });
       const last = state?.lastBlock ?? 0;
       const from = Math.max(startBlock || 0, last > 0 ? last + 1 : 0);
-
+      console.log(key,'key11',state);
       if (from === 0) {
         // If no checkpoint and no start block, default to latest (avoid scanning from genesis)
         const checkpoint = latest;
@@ -233,7 +233,7 @@ async function main() {
         fromBlock: BigInt(from),
         toBlock: BigInt(to),
       });
-console.log(logs,'logs',from,to,factoryAddress);
+
       // Sort for deterministic processing
       logs.sort((a, b) => {
         if (a.blockNumber !== b.blockNumber) return Number(a.blockNumber - b.blockNumber);
