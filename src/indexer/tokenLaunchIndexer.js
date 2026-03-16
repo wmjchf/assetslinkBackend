@@ -6,6 +6,7 @@ import { TokenLaunchRecord } from "../db/models/TokenLaunchRecord.js";
 import { TokenLaunchVestingVault } from "../db/models/TokenLaunchVestingVault.js";
 import { TokenLaunchConfig } from "../db/models/TokenLaunchConfig.js";
 import { TokenLaunchAllocation } from "../db/models/TokenLaunchAllocation.js";
+import { verifyTokenOnEtherscan } from "../etherscan-verify.js";
 
 const TOKEN_FACTORY_EVENTS_ABI = [
   {
@@ -322,6 +323,35 @@ async function main() {
                 maxWalletAmount: String(limits?.maxWalletAmount ?? "0"),
               },
             });
+
+            // Auto-verify the token on Etherscan (non-blocking).
+            // marketingWallet = address(0) in calldata means factory used creator address.
+            const mwArg = String(cfg?.marketingWallet || "");
+            const isZeroAddr = !mwArg || mwArg === "0x0000000000000000000000000000000000000000";
+            const buyFeeBps =
+              Number(fees?.buyMarketingBps ?? 0) +
+              Number(fees?.buyLiquidityBps ?? 0) +
+              Number(fees?.buyBurnBps ?? 0);
+            const sellFeeBps =
+              Number(fees?.sellMarketingBps ?? 0) +
+              Number(fees?.sellLiquidityBps ?? 0) +
+              Number(fees?.sellBurnBps ?? 0);
+
+            verifyTokenOnEtherscan(chainId, token, {
+              factoryAddress,
+              name: String(cfg?.name || ""),
+              symbol: String(cfg?.symbol || ""),
+              totalSupplyRaw: String(cfg?.totalSupplyRaw ?? "0"),
+              marketingWallet: isZeroAddr ? creator : mwArg.toLowerCase(),
+              buyFeeBps,
+              sellFeeBps,
+            })
+              .then((r) => {
+                console.log(`[verify] token=${token} status=${r.status}${r.message ? " msg=" + r.message : ""}`);
+              })
+              .catch((e) => {
+                console.warn("[verify] error:", e?.message || e);
+              });
 
             // allocations (only for distribution functions)
             const recipients =
