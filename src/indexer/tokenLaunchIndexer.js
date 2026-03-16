@@ -232,7 +232,6 @@ async function main() {
         fromBlock: BigInt(from),
         toBlock: BigInt(to),
       });
-console.log(logs,'logs',from,to,factoryAddress);
       // Sort for deterministic processing
       logs.sort((a, b) => {
         if (a.blockNumber !== b.blockNumber) return Number(a.blockNumber - b.blockNumber);
