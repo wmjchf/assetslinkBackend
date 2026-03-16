@@ -278,6 +278,7 @@ async function main() {
             logIndex,
           },
         });
+        console.log(isNew,'TokenLaunchRecord');
         if (isNew) createdCount++;
 
         // Decode tx calldata to store config + allocations (idempotent)
@@ -321,7 +322,7 @@ async function main() {
                 maxWalletAmount: String(limits?.maxWalletAmount ?? "0"),
               },
             });
-
+console.log('TokenLaunchConfig');
             // Auto-verify the token on Etherscan (non-blocking).
             // marketingWallet = address(0) in calldata means factory used creator address.
             const mwArg = String(cfg?.marketingWallet || "");
