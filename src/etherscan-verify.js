@@ -167,7 +167,6 @@ export async function verifyTokenOnEtherscan(chainId, tokenAddress, args) {
 
   try {
     const status = await pollResult(chainId, apiKey, guid);
-    console.log(`[etherscan-verify] verification status: ${status}`);
     return { status };
   } catch (err) {
     const msg = String(err?.message || err);
