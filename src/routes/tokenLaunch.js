@@ -5,7 +5,180 @@ import { TokenLaunchConfig } from "../db/models/TokenLaunchConfig.js";
 import { TokenLaunchVestingVault } from "../db/models/TokenLaunchVestingVault.js";
 import { TokenLaunchAllocation } from "../db/models/TokenLaunchAllocation.js";
 import { buildVaultReleaseCurve } from "../tokenLaunch/releaseCurve.js";
-import { isAddress } from "viem";
+import { isAddress, createPublicClient, http, decodeEventLog, decodeFunctionData } from "viem";
+import { verifyTokenOnEtherscan } from "../etherscan-verify.js";
+
+// ── ABIs ────────────────────────────────────────────────────────────────────
+const TOKEN_FACTORY_EVENTS_ABI = [
+  {
+    type: "event",
+    name: "TokenCreated",
+    inputs: [
+      { indexed: true, name: "creator", type: "address" },
+      { indexed: true, name: "token", type: "address" },
+    ],
+  },
+  {
+    type: "event",
+    name: "VestingCreated",
+    inputs: [
+      { indexed: true, name: "token", type: "address" },
+      { indexed: true, name: "vault", type: "address" },
+      { indexed: true, name: "beneficiary", type: "address" },
+      { indexed: false, name: "amount", type: "uint256" },
+    ],
+  },
+];
+
+const TOKEN_FACTORY_FUNCTIONS_ABI = [
+  {
+    type: "function",
+    name: "createToken",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "cfg",
+        type: "tuple",
+        components: [
+          { name: "name", type: "string" },
+          { name: "symbol", type: "string" },
+          { name: "totalSupplyRaw", type: "uint256" },
+          { name: "marketingWallet", type: "address" },
+          {
+            name: "fees",
+            type: "tuple",
+            components: [
+              { name: "buyMarketingBps", type: "uint16" },
+              { name: "buyLiquidityBps", type: "uint16" },
+              { name: "buyBurnBps", type: "uint16" },
+              { name: "sellMarketingBps", type: "uint16" },
+              { name: "sellLiquidityBps", type: "uint16" },
+              { name: "sellBurnBps", type: "uint16" },
+            ],
+          },
+          {
+            name: "limits",
+            type: "tuple",
+            components: [
+              { name: "maxGasPriceWei", type: "uint256" },
+              { name: "deadBlocks", type: "uint256" },
+              { name: "revertEarlyBuys", type: "bool" },
+              { name: "maxTxAmount", type: "uint256" },
+              { name: "maxWalletAmount", type: "uint256" },
+            ],
+          },
+        ],
+      },
+    ],
+    outputs: [{ name: "tokenAddr", type: "address" }],
+  },
+  {
+    type: "function",
+    name: "createTokenWithDistribution",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "cfg",
+        type: "tuple",
+        components: [
+          { name: "name", type: "string" },
+          { name: "symbol", type: "string" },
+          { name: "totalSupplyRaw", type: "uint256" },
+          { name: "marketingWallet", type: "address" },
+          {
+            name: "fees",
+            type: "tuple",
+            components: [
+              { name: "buyMarketingBps", type: "uint16" },
+              { name: "buyLiquidityBps", type: "uint16" },
+              { name: "buyBurnBps", type: "uint16" },
+              { name: "sellMarketingBps", type: "uint16" },
+              { name: "sellLiquidityBps", type: "uint16" },
+              { name: "sellBurnBps", type: "uint16" },
+            ],
+          },
+          {
+            name: "limits",
+            type: "tuple",
+            components: [
+              { name: "maxGasPriceWei", type: "uint256" },
+              { name: "deadBlocks", type: "uint256" },
+              { name: "revertEarlyBuys", type: "bool" },
+              { name: "maxTxAmount", type: "uint256" },
+              { name: "maxWalletAmount", type: "uint256" },
+            ],
+          },
+        ],
+      },
+      { name: "recipients", type: "address[]" },
+      { name: "amounts", type: "uint256[]" },
+    ],
+    outputs: [{ name: "tokenAddr", type: "address" }],
+  },
+  {
+    type: "function",
+    name: "createTokenWithDistributionAndVesting",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "cfg",
+        type: "tuple",
+        components: [
+          { name: "name", type: "string" },
+          { name: "symbol", type: "string" },
+          { name: "totalSupplyRaw", type: "uint256" },
+          { name: "marketingWallet", type: "address" },
+          {
+            name: "fees",
+            type: "tuple",
+            components: [
+              { name: "buyMarketingBps", type: "uint16" },
+              { name: "buyLiquidityBps", type: "uint16" },
+              { name: "buyBurnBps", type: "uint16" },
+              { name: "sellMarketingBps", type: "uint16" },
+              { name: "sellLiquidityBps", type: "uint16" },
+              { name: "sellBurnBps", type: "uint16" },
+            ],
+          },
+          {
+            name: "limits",
+            type: "tuple",
+            components: [
+              { name: "maxGasPriceWei", type: "uint256" },
+              { name: "deadBlocks", type: "uint256" },
+              { name: "revertEarlyBuys", type: "bool" },
+              { name: "maxTxAmount", type: "uint256" },
+              { name: "maxWalletAmount", type: "uint256" },
+            ],
+          },
+        ],
+      },
+      { name: "recipients", type: "address[]" },
+      { name: "amounts", type: "uint256[]" },
+      {
+        name: "vestings",
+        type: "tuple[]",
+        components: [
+          { name: "beneficiary", type: "address" },
+          { name: "start", type: "uint64" },
+          { name: "cliffSeconds", type: "uint64" },
+          { name: "durationSeconds", type: "uint64" },
+          { name: "amount", type: "uint256" },
+        ],
+      },
+    ],
+    outputs: [{ name: "tokenAddr", type: "address" }],
+  },
+];
+
+function getRpcUrl(chainId) {
+  return process.env[`RPC_URL_${chainId}`];
+}
+
+function normalizeLabel(s) {
+  const v = String(s ?? "").trim();
+  return v ? v.slice(0, 64) : null;
+}
 
 const router = express.Router();
 
@@ -323,6 +496,204 @@ router.get("/api/token-launch/release-curve", async (req, res) => {
     });
   } catch (e) {
     console.error("Failed to load release curve", e);
+    res.status(500).json({ error: e?.message || "Internal server error" });
+  }
+});
+
+// POST /api/token-launch/index-tx
+// Called by frontend immediately after deployment. Fetches tx from chain, writes to DB, triggers verification.
+router.post("/api/token-launch/index-tx", async (req, res) => {
+  const body = req.body;
+  const chainId = Number(body?.chainId || 0);
+  const txHash = String(body?.txHash || "").toLowerCase();
+  const labels = body?.labels || {};
+
+  if (!chainId || !txHash.startsWith("0x") || txHash.length !== 66) {
+    res.status(400).json({ error: "Invalid chainId or txHash" });
+    return;
+  }
+
+  const rpcUrl = getRpcUrl(chainId);
+  if (!rpcUrl) {
+    res.status(400).json({ error: `No RPC configured for chainId=${chainId}. Set RPC_URL_${chainId} env var.` });
+    return;
+  }
+
+  try {
+    await ensureDb();
+
+    const client = createPublicClient({ transport: http(rpcUrl, { timeout: 30_000 }) });
+
+    const [tx, receipt] = await Promise.all([
+      client.getTransaction({ hash: txHash }),
+      client.getTransactionReceipt({ hash: txHash }),
+    ]);
+
+    if (!tx || !receipt) {
+      res.status(404).json({ error: "Transaction not found on chain" });
+      return;
+    }
+
+    if (receipt.status === "reverted") {
+      res.status(400).json({ error: "Transaction reverted" });
+      return;
+    }
+
+    // Decode events from receipt logs
+    const decodedEvents = [];
+    for (const l of receipt.logs) {
+      try {
+        const decoded = decodeEventLog({ abi: TOKEN_FACTORY_EVENTS_ABI, data: l.data, topics: l.topics });
+        decodedEvents.push({ log: l, decoded });
+      } catch { /* ignore */ }
+    }
+
+    const tokenCreatedEvent = decodedEvents.find((e) => e.decoded?.eventName === "TokenCreated");
+    if (!tokenCreatedEvent) {
+      res.status(400).json({ error: "No TokenCreated event found in transaction" });
+      return;
+    }
+
+    const creator = String(tokenCreatedEvent.decoded?.args?.creator || "").toLowerCase();
+    const token = String(tokenCreatedEvent.decoded?.args?.token || "").toLowerCase();
+    const factoryAddress = String(tx.to || "").toLowerCase();
+    const blockNumber = Number(receipt.blockNumber || 0);
+    const logIndex = Number(tokenCreatedEvent.log.logIndex || 0);
+
+    // 1. Upsert main record
+    await TokenLaunchRecord.findOrCreate({
+      where: { chainId, txHash },
+      defaults: { chainId, factoryAddress, creatorAddress: creator, txHash, tokenAddress: token, blockNumber, logIndex },
+    });
+
+    // 2. Decode calldata → config, allocations, vestings
+    let decodedFn = null;
+    try {
+      decodedFn = decodeFunctionData({ abi: TOKEN_FACTORY_FUNCTIONS_ABI, data: tx.input });
+    } catch { /* ignore */ }
+
+    if (decodedFn) {
+      const fn = String(decodedFn?.functionName || "");
+      const args = decodedFn?.args || [];
+      const cfg = args?.[0] || {};
+      const fees = cfg?.fees || {};
+      const limits = cfg?.limits || {};
+
+      await TokenLaunchConfig.findOrCreate({
+        where: { chainId, txHash },
+        defaults: {
+          chainId, txHash, tokenAddress: token, factoryAddress, creatorAddress: creator,
+          name: String(cfg?.name || ""),
+          symbol: String(cfg?.symbol || ""),
+          totalSupplyRaw: String(cfg?.totalSupplyRaw ?? "0"),
+          marketingWallet: String(cfg?.marketingWallet || "").toLowerCase(),
+          buyMarketingBps: Number(fees?.buyMarketingBps ?? 0),
+          buyLiquidityBps: Number(fees?.buyLiquidityBps ?? 0),
+          buyBurnBps: Number(fees?.buyBurnBps ?? 0),
+          sellMarketingBps: Number(fees?.sellMarketingBps ?? 0),
+          sellLiquidityBps: Number(fees?.sellLiquidityBps ?? 0),
+          sellBurnBps: Number(fees?.sellBurnBps ?? 0),
+          maxGasPriceWei: String(limits?.maxGasPriceWei ?? "0"),
+          deadBlocks: String(limits?.deadBlocks ?? "0"),
+          revertEarlyBuys: Boolean(limits?.revertEarlyBuys ?? true),
+          maxTxAmount: String(limits?.maxTxAmount ?? "0"),
+          maxWalletAmount: String(limits?.maxWalletAmount ?? "0"),
+        },
+      });
+
+      // Allocations
+      const recipients =
+        fn === "createTokenWithDistribution" || fn === "createTokenWithDistributionAndVesting"
+          ? (args?.[1] || []) : [];
+      const amounts =
+        fn === "createTokenWithDistribution" || fn === "createTokenWithDistributionAndVesting"
+          ? (args?.[2] || []) : [];
+      const vestingInputs = fn === "createTokenWithDistributionAndVesting" ? (args?.[3] || []) : [];
+
+      let sum = BigInt(0);
+      const allocLabels = Array.isArray(labels.allocations) ? labels.allocations : [];
+      for (let i = 0; i < recipients.length; i++) {
+        const toAddr = String(recipients[i] || "").toLowerCase();
+        const amt = BigInt(String(amounts[i] ?? "0"));
+        sum += amt;
+        const userLabel = allocLabels.find((l) => Number(l?.allocIndex) === i);
+        await TokenLaunchAllocation.findOrCreate({
+          where: { chainId, txHash, allocIndex: i },
+          defaults: {
+            chainId, txHash, tokenAddress: token, toAddress: toAddr,
+            amount: amt.toString(), allocationType: "immediate", allocIndex: i,
+            label: normalizeLabel(userLabel?.label),
+          },
+        });
+      }
+
+      for (const v of vestingInputs) {
+        sum += BigInt(String(v?.amount ?? "0"));
+      }
+
+      // Creator remaining
+      const totalSupplyRaw = BigInt(String(cfg?.totalSupplyRaw ?? "0"));
+      const remaining = totalSupplyRaw > sum ? totalSupplyRaw - sum : BigInt(0);
+      if (remaining > BigInt(0)) {
+        await TokenLaunchAllocation.findOrCreate({
+          where: { chainId, txHash, allocIndex: 999999 },
+          defaults: {
+            chainId, txHash, tokenAddress: token, toAddress: creator,
+            amount: remaining.toString(), allocationType: "creator_remaining", allocIndex: 999999,
+          },
+        });
+      }
+
+      // Vesting vaults — match VestingCreated events with calldata by order
+      const vestingEvents = decodedEvents
+        .filter((e) => e.decoded?.eventName === "VestingCreated")
+        .sort((a, b) => (Number(a.log.logIndex) || 0) - (Number(b.log.logIndex) || 0));
+
+      const vestLabels = Array.isArray(labels.vestings) ? labels.vestings : [];
+      const n = Math.min(vestingInputs.length, vestingEvents.length);
+      for (let i = 0; i < n; i++) {
+        const vInput = vestingInputs[i] || {};
+        const vEvent = vestingEvents[i].decoded?.args || {};
+        const vault = String(vEvent?.vault || "").toLowerCase();
+        const beneficiary = String(vEvent?.beneficiary || "").toLowerCase();
+        const amount = String(vEvent?.amount || "0");
+        const userVestLabel = vestLabels.find((l) => Number(l?.vestingIndex) === i);
+
+        await TokenLaunchVestingVault.findOrCreate({
+          where: { chainId, txHash, vaultAddress: vault },
+          defaults: {
+            chainId, txHash, tokenAddress: token,
+            vaultAddress: vault, beneficiary, amount,
+            blockNumber: Number(receipt.blockNumber || 0),
+            logIndex: Number(vestingEvents[i].log.logIndex || 0),
+            vestingStart: String(vInput?.start ?? ""),
+            vestingCliffSeconds: String(vInput?.cliffSeconds ?? ""),
+            vestingDurationSeconds: String(vInput?.durationSeconds ?? ""),
+            vestingIndex: i,
+            label: normalizeLabel(userVestLabel?.label),
+          },
+        });
+      }
+
+      // Trigger Etherscan verification (non-blocking)
+      const mwArg = String(cfg?.marketingWallet || "");
+      const isZeroMw = !mwArg || mwArg === "0x0000000000000000000000000000000000000000";
+      verifyTokenOnEtherscan(chainId, token, {
+        factoryAddress,
+        name: String(cfg?.name || ""),
+        symbol: String(cfg?.symbol || ""),
+        totalSupplyRaw: String(cfg?.totalSupplyRaw ?? "0"),
+        marketingWallet: isZeroMw ? creator : mwArg.toLowerCase(),
+        buyFeeBps: Number(fees?.buyMarketingBps ?? 0) + Number(fees?.buyLiquidityBps ?? 0) + Number(fees?.buyBurnBps ?? 0),
+        sellFeeBps: Number(fees?.sellMarketingBps ?? 0) + Number(fees?.sellLiquidityBps ?? 0) + Number(fees?.sellBurnBps ?? 0),
+      })
+        .then((r) => console.log(`[index-tx][verify] token=${token} status=${r.status}${r.message ? " msg=" + r.message : ""}`))
+        .catch((e) => console.warn("[index-tx][verify] error:", e?.message || e));
+    }
+
+    res.json({ ok: true, chainId, txHash, tokenAddress: token });
+  } catch (e) {
+    console.error("[index-tx] error:", e);
     res.status(500).json({ error: e?.message || "Internal server error" });
   }
 });
