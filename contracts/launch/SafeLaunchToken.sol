@@ -15,7 +15,7 @@ pragma solidity ^0.8.28;
  * ✓ is_blacklisted        = 0  — no blacklist
  * ✓ is_whitelisted        = 0  — no whitelist
  * ✓ is_anti_whale         = 0  — no tx/wallet limits
- * ✓ anti_whale_modifiable = 0  — (nothing to modify)
+ * ✓ anti_whale_modifiable = 0  — pair is set-once (pairLocked=true after setPair)
  * ✓ transfer_pausable     = 0  — no trading gate or pause function
  * ✓ external_call         = 0  — _update never calls external contracts;
  *                                fees are sent as tokens directly to marketingWallet
@@ -49,6 +49,9 @@ contract SafeLaunchToken is ERC20, Ownable {
   // Public flag: confirms fees cannot be changed (no setter exists).
   bool public constant feesLocked = true;
 
+  // Once setPair is called, pairLocked = true and pair can never be changed again.
+  bool public pairLocked;
+
   event PairSet(address indexed pair);
 
   constructor(
@@ -61,8 +64,8 @@ contract SafeLaunchToken is ERC20, Ownable {
     uint16 sellFeeBps_
   ) ERC20(name_, symbol_) Ownable(initialOwner_) {
     require(supplyRaw_ > 0,        "supply=0");
-    require(buyFeeBps_  <= 2_000,  "buy fee > 20%");
-    require(sellFeeBps_ <= 2_000,  "sell fee > 20%");
+    require(buyFeeBps_  <= 1_000,  "buy fee > 10%");
+    require(sellFeeBps_ <= 1_000,  "sell fee > 10%");
 
     marketingWallet = marketingWallet_ != address(0) ? marketingWallet_ : initialOwner_;
     buyFeeBps  = buyFeeBps_;
@@ -80,7 +83,9 @@ contract SafeLaunchToken is ERC20, Ownable {
    * fee routing. Does not enable or disable trading.
    */
   function setPair(address pair_) external onlyOwner {
+    require(!pairLocked, "pair locked");
     uniswapV2Pair = pair_;
+    pairLocked = true;
     emit PairSet(pair_);
   }
 

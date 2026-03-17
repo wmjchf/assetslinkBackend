@@ -19,6 +19,35 @@ const SUPPORTED_CHAIN_IDS = new Set([1, 11155111, 8453, 84532, 56, 97, 42161, 10
 
 // ── Build-info loader ────────────────────────────────────────────────────────
 
+/**
+ * Walk the compiler AST to collect the set of source keys transitively
+ * imported by `startKey`. Uses `absolutePath` from ImportDirective nodes,
+ * which is already resolved by the Solidity compiler — no manual path math.
+ */
+function collectNeededSources(outputSources, inputSources, startKey) {
+  const needed = new Set();
+  const queue = [startKey];
+
+  while (queue.length > 0) {
+    const key = queue.shift();
+    if (needed.has(key)) continue;
+    needed.add(key);
+
+    const ast = outputSources?.[key]?.ast;
+    if (!ast) continue;
+
+    for (const node of ast.nodes ?? []) {
+      if (node.nodeType !== "ImportDirective") continue;
+      const dep = node.absolutePath;
+      if (dep && inputSources[dep] && !needed.has(dep)) {
+        queue.push(dep);
+      }
+    }
+  }
+
+  return needed;
+}
+
 function loadBuildInfo(contractSourceKey) {
   if (!fs.existsSync(BUILD_INFO_DIR)) {
     console.error(`[etherscan-verify] BUILD_INFO_DIR not found: ${BUILD_INFO_DIR}`);
@@ -39,10 +68,25 @@ function loadBuildInfo(contractSourceKey) {
   for (const { f } of files) {
     try {
       const data = JSON.parse(fs.readFileSync(path.join(BUILD_INFO_DIR, f), "utf8"));
-      if (data?.input?.sources?.[contractSourceKey]) {
-        console.log(`[etherscan-verify] Using build-info: ${f} (for ${contractSourceKey})`);
-        return { input: data.input, solcLongVersion: data.solcLongVersion };
-      }
+      if (!data?.input?.sources?.[contractSourceKey]) continue;
+
+      console.log(`[etherscan-verify] Using build-info: ${f} (for ${contractSourceKey})`);
+
+      // Filter sources to only the files actually needed by contractSourceKey.
+      // This prevents unrelated contracts from appearing on Etherscan's Sources tab.
+      const needed = collectNeededSources(data.output?.sources, data.input.sources, contractSourceKey);
+      const filteredInput = {
+        ...data.input,
+        sources: Object.fromEntries(
+          Object.entries(data.input.sources).filter(([k]) => needed.has(k))
+        ),
+      };
+
+      console.log(
+        `[etherscan-verify] Sources: ${needed.size} needed / ${Object.keys(data.input.sources).length} total`
+      );
+
+      return { input: filteredInput, solcLongVersion: data.solcLongVersion };
     } catch {
       // skip unreadable files
     }
