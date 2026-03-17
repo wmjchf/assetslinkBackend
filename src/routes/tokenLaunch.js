@@ -6,7 +6,7 @@ import { TokenLaunchVestingVault } from "../db/models/TokenLaunchVestingVault.js
 import { TokenLaunchAllocation } from "../db/models/TokenLaunchAllocation.js";
 import { buildVaultReleaseCurve } from "../tokenLaunch/releaseCurve.js";
 import { isAddress, createPublicClient, http, decodeEventLog, decodeFunctionData } from "viem";
-import { verifyTokenOnEtherscan } from "../etherscan-verify.js";
+import { verifyTokenOnEtherscan, verifyVestingVaultOnEtherscan } from "../etherscan-verify.js";
 
 // ── ABIs ────────────────────────────────────────────────────────────────────
 const TOKEN_FACTORY_EVENTS_ABI = [
@@ -689,6 +689,27 @@ router.post("/api/token-launch/index-tx", async (req, res) => {
       })
         .then((r) => console.log(`[index-tx][verify] token=${token} status=${r.status}${r.message ? " msg=" + r.message : ""}`))
         .catch((e) => console.warn("[index-tx][verify] error:", e?.message || e));
+
+      // Verify each vesting vault (non-blocking, staggered to avoid rate-limiting)
+      for (let i = 0; i < n; i++) {
+        const vInput = vestingInputs[i] || {};
+        const vEvent = vestingEvents[i]?.decoded?.args || {};
+        const vault = String(vEvent?.vault || "").toLowerCase();
+        if (!vault) continue;
+        const delayMs = i * 5_000; // stagger by 5s per vault
+        setTimeout(() => {
+          verifyVestingVaultOnEtherscan(chainId, vault, {
+            tokenAddress: token,
+            beneficiary: String(vEvent?.beneficiary || "").toLowerCase(),
+            start: String(vInput?.start ?? "0"),
+            cliffSeconds: String(vInput?.cliffSeconds ?? "0"),
+            durationSeconds: String(vInput?.durationSeconds ?? "0"),
+            totalAllocation: String(vEvent?.amount ?? "0"),
+          })
+            .then((r) => console.log(`[index-tx][verify] vault=${vault} status=${r.status}${r.message ? " msg=" + r.message : ""}`))
+            .catch((e) => console.warn("[index-tx][verify] vault error:", e?.message || e));
+        }, delayMs);
+      }
     }
 
     res.json({ ok: true, chainId, txHash, tokenAddress: token });
