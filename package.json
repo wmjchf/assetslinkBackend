@@ -12,6 +12,7 @@
     "indexer:bsc-testnet": "dotenv -e .env.development -e .env.bsctest -- node src/indexer/tokenLaunchIndexer.js",
     "indexer:mainnet": "dotenv -e .env.production -e .env.main -- node src/indexer/tokenLaunchIndexer.js",
     "indexer:bsc": "dotenv -e .env.production -e .env.bsc -- node src/indexer/tokenLaunchIndexer.js",
+    "indexer:base": "dotenv -e .env.production -e .env.base -- node src/indexer/tokenLaunchIndexer.js",
     "pm2:start:dev": "pm2 start pnpm --name 'index:sepolia' -- run indexer:sepolia & pm2 start pnpm --name 'index:base-sepolia' -- run indexer:base-sepolia & pm2 start pnpm --name 'index:bsc-testnet' -- run indexer:bsc-testnet & pm2 start pnpm --name 'assetslink:start' -- run dev",
     "pm2:restart:dev": "pm2 restart index:sepolia index:base-sepolia index:bsc-testnet dev",
     "pm2:start:prod": "pm2 start pnpm --name 'index:mainnet' -- run indexer:mainnet & pm2 start pnpm --name 'assetslink:start' -- run start",
