@@ -153,7 +153,6 @@ export async function verifyTokenOnEtherscan(chainId, tokenAddress, args) {
       );
       break;
     } catch (err) {
-      console.error(msg.toLowerCase(),'erweee');
       const msg = String(err?.message || err);
       if (msg.toLowerCase().includes("already verified")) return { status: "already_verified" };
       const isNotFound = msg.toLowerCase().includes("unable to locate");
@@ -168,6 +167,7 @@ export async function verifyTokenOnEtherscan(chainId, tokenAddress, args) {
 
   try {
     const status = await pollResult(chainId, apiKey, guid);
+    console.log(`[etherscan-verify] verification status: ${status}`);
     return { status };
   } catch (err) {
     const msg = String(err?.message || err);
