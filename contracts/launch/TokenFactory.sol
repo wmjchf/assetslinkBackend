@@ -1,23 +1,19 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.28;
 
 /**
  * TokenFactory
  *
- * Deploys SafeLaunchToken instances via `new` (no proxy / no clone).
+ * Deploys SafeLaunchToken and LinearVestingVault instances via `new` (no proxy / no clone).
  *
  * Why `new` instead of Clones (EIP-1167)?
  * - EIP-1167 creates a minimal proxy whose bytecode only delegates to the
  *   implementation. Etherscan shows it as "Read/Write Contract as Proxy" and
  *   GoPlus flags is_proxy = 1 + is_open_source = 0 (source not verified for
  *   the proxy shell itself).
- * - With `new SafeLaunchToken(...)`, every deployed token IS the full contract.
- *   Etherscan matches the identical deployed bytecode to this verified source
- *   and marks each token as verified automatically (bytecode-match verification).
+ * - With `new`, every deployed contract IS the full implementation.
+ *   Etherscan matches the identical deployed bytecode to the verified source.
  *   Result: is_proxy = 0, is_open_source = 1.
- *
- * Vesting vaults still use Clones because they are internal infrastructure
- * (beneficiaries interact with them directly, not traded on-chain).
  *
  * ABI-compatible with previous factory:
  *   - TokenConfig still has `fees` (6 BPS sub-fields) and `limits` structs.
@@ -25,13 +21,12 @@ pragma solidity ^0.8.20;
  *   - Buy/sell fee totals are derived by summing the 3 BPS sub-fields each.
  */
 
-import "@openzeppelin/contracts/proxy/Clones.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import "./SafeLaunchToken.sol";
-import "./LinearVestingVaultUpgradeable.sol";
+import "./LinearVestingVault.sol";
 
 contract TokenFactory is ReentrancyGuard {
   using SafeERC20 for IERC20;
@@ -50,9 +45,6 @@ contract TokenFactory is ReentrancyGuard {
   );
   event FeesWithdrawn(address indexed to, uint256 amountWei);
 
-  // Vesting vaults are still clone-based (internal infra, not traded tokens).
-  address public immutable vestingImplementation;
-
   address public owner;
   uint256 public basicFeeWei;         // createToken
   uint256 public distributionFeeWei;  // createTokenWithDistribution
@@ -63,9 +55,7 @@ contract TokenFactory is ReentrancyGuard {
     _;
   }
 
-  constructor(address vestingImplementation_) {
-    require(vestingImplementation_ != address(0), "vestingImpl=0");
-    vestingImplementation = vestingImplementation_;
+  constructor() {
     owner = msg.sender;
     emit OwnershipTransferred(address(0), msg.sender);
 
@@ -202,8 +192,7 @@ contract TokenFactory is ReentrancyGuard {
   }
 
   function _deployVesting(address tokenAddr, Vesting calldata v) private returns (address vaultAddr) {
-    vaultAddr = Clones.clone(vestingImplementation);
-    LinearVestingVaultUpgradeable(vaultAddr).initialize(
+    LinearVestingVault vault = new LinearVestingVault(
       tokenAddr,
       v.beneficiary,
       v.start,
@@ -211,6 +200,7 @@ contract TokenFactory is ReentrancyGuard {
       v.durationSeconds,
       v.amount
     );
+    vaultAddr = address(vault);
   }
 
   function _validateRecipientsAndSum(

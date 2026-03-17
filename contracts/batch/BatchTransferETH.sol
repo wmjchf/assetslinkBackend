@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.28;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
@@ -173,7 +173,7 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
     function _requireSufficientAllowance(
         address token,
         uint256 totalAmount,
-        uint256 count
+        uint256 /* count */
     ) internal view {
         require(
             IERC20(token).allowance(msg.sender, address(this)) >= totalAmount,
