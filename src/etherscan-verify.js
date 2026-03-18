@@ -196,20 +196,17 @@ async function verifyContract(chainId, contractAddress, contractName, sourceKey,
  * @param {number} chainId
  * @param {string} tokenAddress
  * @param {{ factoryAddress: string, name: string, symbol: string,
- *           totalSupplyRaw: string|bigint, marketingWallet: string,
- *           buyFeeBps: number, sellFeeBps: number }} args
+ *           totalSupplyRaw: string|bigint, decimals: number }} args
  */
 export async function verifyTokenOnEtherscan(chainId, tokenAddress, args) {
   const constructorArguments = encodeAbiParameters(
-    parseAbiParameters("address, string, string, uint256, address, uint16, uint16"),
+    parseAbiParameters("address, string, string, uint256, uint8"),
     [
       args.factoryAddress,
       args.name,
       args.symbol,
       BigInt(args.totalSupplyRaw),
-      args.marketingWallet,
-      args.buyFeeBps,
-      args.sellFeeBps,
+      args.decimals ?? 18,
     ]
   ).slice(2);
 

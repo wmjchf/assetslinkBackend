@@ -43,30 +43,7 @@ const TOKEN_FACTORY_FUNCTIONS_ABI = [
           { name: "name", type: "string" },
           { name: "symbol", type: "string" },
           { name: "totalSupplyRaw", type: "uint256" },
-          { name: "marketingWallet", type: "address" },
-          {
-            name: "fees",
-            type: "tuple",
-            components: [
-              { name: "buyMarketingBps", type: "uint16" },
-              { name: "buyLiquidityBps", type: "uint16" },
-              { name: "buyBurnBps", type: "uint16" },
-              { name: "sellMarketingBps", type: "uint16" },
-              { name: "sellLiquidityBps", type: "uint16" },
-              { name: "sellBurnBps", type: "uint16" },
-            ],
-          },
-          {
-            name: "limits",
-            type: "tuple",
-            components: [
-              { name: "maxGasPriceWei", type: "uint256" },
-              { name: "deadBlocks", type: "uint256" },
-              { name: "revertEarlyBuys", type: "bool" },
-              { name: "maxTxAmount", type: "uint256" },
-              { name: "maxWalletAmount", type: "uint256" },
-            ],
-          },
+          { name: "decimals", type: "uint8" },
         ],
       },
     ],
@@ -84,30 +61,7 @@ const TOKEN_FACTORY_FUNCTIONS_ABI = [
           { name: "name", type: "string" },
           { name: "symbol", type: "string" },
           { name: "totalSupplyRaw", type: "uint256" },
-          { name: "marketingWallet", type: "address" },
-          {
-            name: "fees",
-            type: "tuple",
-            components: [
-              { name: "buyMarketingBps", type: "uint16" },
-              { name: "buyLiquidityBps", type: "uint16" },
-              { name: "buyBurnBps", type: "uint16" },
-              { name: "sellMarketingBps", type: "uint16" },
-              { name: "sellLiquidityBps", type: "uint16" },
-              { name: "sellBurnBps", type: "uint16" },
-            ],
-          },
-          {
-            name: "limits",
-            type: "tuple",
-            components: [
-              { name: "maxGasPriceWei", type: "uint256" },
-              { name: "deadBlocks", type: "uint256" },
-              { name: "revertEarlyBuys", type: "bool" },
-              { name: "maxTxAmount", type: "uint256" },
-              { name: "maxWalletAmount", type: "uint256" },
-            ],
-          },
+          { name: "decimals", type: "uint8" },
         ],
       },
       { name: "recipients", type: "address[]" },
@@ -127,30 +81,7 @@ const TOKEN_FACTORY_FUNCTIONS_ABI = [
           { name: "name", type: "string" },
           { name: "symbol", type: "string" },
           { name: "totalSupplyRaw", type: "uint256" },
-          { name: "marketingWallet", type: "address" },
-          {
-            name: "fees",
-            type: "tuple",
-            components: [
-              { name: "buyMarketingBps", type: "uint16" },
-              { name: "buyLiquidityBps", type: "uint16" },
-              { name: "buyBurnBps", type: "uint16" },
-              { name: "sellMarketingBps", type: "uint16" },
-              { name: "sellLiquidityBps", type: "uint16" },
-              { name: "sellBurnBps", type: "uint16" },
-            ],
-          },
-          {
-            name: "limits",
-            type: "tuple",
-            components: [
-              { name: "maxGasPriceWei", type: "uint256" },
-              { name: "deadBlocks", type: "uint256" },
-              { name: "revertEarlyBuys", type: "bool" },
-              { name: "maxTxAmount", type: "uint256" },
-              { name: "maxWalletAmount", type: "uint256" },
-            ],
-          },
+          { name: "decimals", type: "uint8" },
         ],
       },
       { name: "recipients", type: "address[]" },
@@ -676,16 +607,12 @@ router.post("/api/token-launch/index-tx", async (req, res) => {
       }
 
       // Trigger Etherscan verification (non-blocking)
-      const mwArg = String(cfg?.marketingWallet || "");
-      const isZeroMw = !mwArg || mwArg === "0x0000000000000000000000000000000000000000";
       verifyTokenOnEtherscan(chainId, token, {
         factoryAddress,
         name: String(cfg?.name || ""),
         symbol: String(cfg?.symbol || ""),
         totalSupplyRaw: String(cfg?.totalSupplyRaw ?? "0"),
-        marketingWallet: isZeroMw ? creator : mwArg.toLowerCase(),
-        buyFeeBps: Number(fees?.buyMarketingBps ?? 0) + Number(fees?.buyLiquidityBps ?? 0) + Number(fees?.buyBurnBps ?? 0),
-        sellFeeBps: Number(fees?.sellMarketingBps ?? 0) + Number(fees?.sellLiquidityBps ?? 0) + Number(fees?.sellBurnBps ?? 0),
+        decimals: Number(cfg?.decimals ?? 18),
       })
         .then((r) => console.log(`[index-tx][verify] token=${token} status=${r.status}${r.message ? " msg=" + r.message : ""}`))
         .catch((e) => console.warn("[index-tx][verify] error:", e?.message || e));
