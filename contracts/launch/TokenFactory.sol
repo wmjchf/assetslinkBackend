@@ -110,44 +110,13 @@ contract TokenFactory is ReentrancyGuard {
   }
 
   // ---------------------------------------------------------------------------
-  // Structs — ABI-compatible with the previous factory version.
+  // Structs
   // ---------------------------------------------------------------------------
 
   struct TokenConfig {
-    string name;
-    string symbol;
+    string  name;
+    string  symbol;
     uint256 totalSupplyRaw;
-    address marketingWallet;
-    Fees fees;
-    Limits limits; // accepted for ABI compatibility; not applied to the token
-  }
-
-  /**
-   * Buy/sell fees split into marketing + liquidity + burn sub-fields.
-   * The factory sums them into a single buyFeeBps / sellFeeBps and passes
-   * the total to SafeLaunchToken, which routes everything to marketingWallet
-   * as tokens (simple, no external-call risk).
-   */
-  struct Fees {
-    uint16 buyMarketingBps;
-    uint16 buyLiquidityBps;
-    uint16 buyBurnBps;
-    uint16 sellMarketingBps;
-    uint16 sellLiquidityBps;
-    uint16 sellBurnBps;
-  }
-
-  /**
-   * Kept for ABI compatibility only. SafeLaunchToken has no limit mechanism,
-   * so these values are accepted but not applied:
-   *   is_anti_whale = 0, anti_whale_modifiable = 0, trading_cooldown = 0.
-   */
-  struct Limits {
-    uint256 maxGasPriceWei;
-    uint256 deadBlocks;
-    bool    revertEarlyBuys;
-    uint256 maxTxAmount;
-    uint256 maxWalletAmount;
   }
 
   struct Vesting {
@@ -162,31 +131,14 @@ contract TokenFactory is ReentrancyGuard {
   // Internal helpers
   // ---------------------------------------------------------------------------
 
-  function _sumFeeBps(Fees calldata f) private pure returns (uint16 buyTotal, uint16 sellTotal) {
-    buyTotal  = f.buyMarketingBps  + f.buyLiquidityBps  + f.buyBurnBps;
-    sellTotal = f.sellMarketingBps + f.sellLiquidityBps + f.sellBurnBps;
-    require(buyTotal  <= 2_000, "buy fee > 20%");
-    require(sellTotal <= 2_000, "sell fee > 20%");
-  }
-
   function _deployToken(
     TokenConfig calldata cfg
   ) private returns (SafeLaunchToken token, address tokenAddr) {
-    (uint16 buyBps, uint16 sellBps) = _sumFeeBps(cfg.fees);
-
-    address marketing = cfg.marketingWallet != address(0) ? cfg.marketingWallet : msg.sender;
-
-    // Deploy a full contract instance — NOT a proxy.
-    // Each token has the same deployed bytecode → Etherscan auto-verifies via
-    // bytecode match once this source is verified. is_proxy = 0.
     token = new SafeLaunchToken(
-      address(this), // factory holds ownership until hand-off at end of create*
+      address(this),
       cfg.name,
       cfg.symbol,
-      cfg.totalSupplyRaw,
-      marketing,
-      buyBps,
-      sellBps
+      cfg.totalSupplyRaw
     );
     tokenAddr = address(token);
   }

@@ -43,7 +43,6 @@ const TOKEN_FACTORY_FUNCTIONS_ABI = [
           { name: "name", type: "string" },
           { name: "symbol", type: "string" },
           { name: "totalSupplyRaw", type: "uint256" },
-          { name: "decimals", type: "uint8" },
         ],
       },
     ],
@@ -61,7 +60,6 @@ const TOKEN_FACTORY_FUNCTIONS_ABI = [
           { name: "name", type: "string" },
           { name: "symbol", type: "string" },
           { name: "totalSupplyRaw", type: "uint256" },
-          { name: "decimals", type: "uint8" },
         ],
       },
       { name: "recipients", type: "address[]" },
@@ -81,7 +79,6 @@ const TOKEN_FACTORY_FUNCTIONS_ABI = [
           { name: "name", type: "string" },
           { name: "symbol", type: "string" },
           { name: "totalSupplyRaw", type: "uint256" },
-          { name: "decimals", type: "uint8" },
         ],
       },
       { name: "recipients", type: "address[]" },
@@ -612,7 +609,7 @@ router.post("/api/token-launch/index-tx", async (req, res) => {
         name: String(cfg?.name || ""),
         symbol: String(cfg?.symbol || ""),
         totalSupplyRaw: String(cfg?.totalSupplyRaw ?? "0"),
-        decimals: Number(cfg?.decimals ?? 18),
+        decimals: 18,
       })
         .then((r) => console.log(`[index-tx][verify] token=${token} status=${r.status}${r.message ? " msg=" + r.message : ""}`))
         .catch((e) => console.warn("[index-tx][verify] error:", e?.message || e));
