@@ -4,6 +4,7 @@ import { initIndexerStateModel } from "./models/IndexerState.js";
 import { initTokenLaunchVestingVaultModel } from "./models/TokenLaunchVestingVault.js";
 import { initTokenLaunchConfigModel } from "./models/TokenLaunchConfig.js";
 import { initTokenLaunchAllocationModel } from "./models/TokenLaunchAllocation.js";
+import { initLpLockRecordModel } from "./models/LpLockRecord.js";
 import mysql from "mysql2/promise";
 
 let initialized = false;
@@ -149,6 +150,34 @@ async function ensureAllocationColumns() {
   }
 }
 
+async function ensureLpLockTokenColumns() {
+  const info = getMysqlInfo();
+  if (!info.host || !info.user || !info.database) return;
+  const conn = await mysql.createConnection({
+    host: info.host, port: info.port,
+    user: info.user, password: info.password, database: info.database,
+  });
+  try {
+    const cols = [
+      { name: "tokenName",     ddl: "VARCHAR(64) NULL" },
+      { name: "tokenSymbol",   ddl: "VARCHAR(32) NULL" },
+      { name: "tokenDecimals", ddl: "TINYINT UNSIGNED NULL" },
+    ];
+    for (const c of cols) {
+      const [rows] = await conn.query(
+        `SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'lp_lock_records' AND COLUMN_NAME = ?`,
+        [info.database, c.name]
+      );
+      if (Number(rows?.[0]?.cnt || 0) === 0) {
+        await conn.query(`ALTER TABLE lp_lock_records ADD COLUMN ${c.name} ${c.ddl}`);
+      }
+    }
+  } finally {
+    await conn.end();
+  }
+}
+
 export async function ensureDb() {
   if (initialized) return;
   initTokenLaunchRecordModel();
@@ -156,6 +185,7 @@ export async function ensureDb() {
   initTokenLaunchVestingVaultModel();
   initTokenLaunchConfigModel();
   initTokenLaunchAllocationModel();
+  initLpLockRecordModel();
   const sequelize = getSequelize();
   try {
     await sequelize.authenticate();
@@ -176,6 +206,8 @@ export async function ensureDb() {
   await ensureVestingVaultColumns();
   // Ensure label column exists for allocations table.
   await ensureAllocationColumns();
+  // Ensure token metadata columns exist for lp_lock_records.
+  await ensureLpLockTokenColumns();
   initialized = true;
 }
 

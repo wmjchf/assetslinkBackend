@@ -137,7 +137,7 @@ contract V2LaunchFactory {
 
     // Deploy or reuse LP lock contract
     if (lpLockAddress == address(0)) {
-      LPTimeLock l = new LPTimeLock();
+      LPTimeLock l = new LPTimeLock(0, address(this));
       lockAddr = address(l);
     } else {
       lockAddr = lpLockAddress;
