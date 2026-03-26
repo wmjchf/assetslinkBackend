@@ -11,7 +11,7 @@ const ERC20_ABI = [
   { type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "uint8"   }] },
 ];
 
-const LP_TIMELOCK_EVENTS_ABI = [
+const LP_TIMELOCK_EVENTS_ABI_V1 = [
   {
     type: "event",
     name: "LockCreated",
@@ -20,6 +20,21 @@ const LP_TIMELOCK_EVENTS_ABI = [
       { indexed: true, name: "token", type: "address" },
       { indexed: true, name: "beneficiary", type: "address" },
       { name: "amount", type: "uint256" },
+      { name: "unlockTime", type: "uint256" },
+    ],
+  },
+];
+
+const LP_TIMELOCK_EVENTS_ABI_V2 = [
+  {
+    type: "event",
+    name: "LockCreated",
+    inputs: [
+      { indexed: true, name: "id", type: "uint256" },
+      { indexed: true, name: "token", type: "address" },
+      { indexed: true, name: "beneficiary", type: "address" },
+      { name: "requestedAmount", type: "uint256" },
+      { name: "receivedAmount", type: "uint256" },
       { name: "unlockTime", type: "uint256" },
     ],
   },
@@ -153,11 +168,20 @@ router.post("/api/lp-lock/index-tx", async (req, res) => {
     const lockEvents = [];
     for (const log of receipt.logs) {
       try {
-        const decoded = decodeEventLog({
-          abi: LP_TIMELOCK_EVENTS_ABI,
-          data: log.data,
-          topics: log.topics,
-        });
+        let decoded;
+        try {
+          decoded = decodeEventLog({
+            abi: LP_TIMELOCK_EVENTS_ABI_V2,
+            data: log.data,
+            topics: log.topics,
+          });
+        } catch {
+          decoded = decodeEventLog({
+            abi: LP_TIMELOCK_EVENTS_ABI_V1,
+            data: log.data,
+            topics: log.topics,
+          });
+        }
         if (decoded?.eventName === "LockCreated") {
           lockEvents.push({ log, decoded });
         }
@@ -201,7 +225,7 @@ router.post("/api/lp-lock/index-tx", async (req, res) => {
       const lockId = String(decoded.args.id);
       const tokenAddress = String(decoded.args.token || "").toLowerCase();
       const beneficiaryAddress = String(decoded.args.beneficiary || "").toLowerCase();
-      const amount = String(decoded.args.amount ?? "0");
+      const amount = String(decoded.args.receivedAmount ?? decoded.args.amount ?? "0");
       const unlockTime = String(decoded.args.unlockTime ?? "0");
       const logIndex = Number(log.logIndex || 0);
       const meta = tokenMetaMap[tokenAddress] || {};
