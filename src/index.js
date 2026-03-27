@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import tokenLaunchRouter from "./routes/tokenLaunch.js";
 import lpLockRouter from "./routes/lpLock.js";
+import communityInternalRouter from "./routes/communityInternal.js";
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -23,6 +24,7 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use(tokenLaunchRouter);
 app.use(lpLockRouter);
+app.use(communityInternalRouter);
 
 // Health check
 app.get("/health", (req, res) => {

@@ -5,6 +5,7 @@ import { initTokenLaunchVestingVaultModel } from "./models/TokenLaunchVestingVau
 import { initTokenLaunchConfigModel } from "./models/TokenLaunchConfig.js";
 import { initTokenLaunchAllocationModel } from "./models/TokenLaunchAllocation.js";
 import { initLpLockRecordModel } from "./models/LpLockRecord.js";
+import { initCommunityUserModel } from "./models/CommunityUser.js";
 import mysql from "mysql2/promise";
 
 let initialized = false;
@@ -186,6 +187,7 @@ export async function ensureDb() {
   initTokenLaunchConfigModel();
   initTokenLaunchAllocationModel();
   initLpLockRecordModel();
+  initCommunityUserModel();
   const sequelize = getSequelize();
   try {
     await sequelize.authenticate();
