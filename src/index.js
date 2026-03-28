@@ -3,6 +3,7 @@ import cors from "cors";
 import tokenLaunchRouter from "./routes/tokenLaunch.js";
 import lpLockRouter from "./routes/lpLock.js";
 import communityInternalRouter from "./routes/communityInternal.js";
+import batchTransferRouter from "./routes/batchTransfer.js";
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -25,6 +26,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(tokenLaunchRouter);
 app.use(lpLockRouter);
 app.use(communityInternalRouter);
+app.use(batchTransferRouter);
 
 // Health check
 app.get("/health", (req, res) => {

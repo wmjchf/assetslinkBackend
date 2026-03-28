@@ -161,6 +161,22 @@ pnpm indexer
 - `tokenAddress` (必需): Token 地址
 - `chainId` (必需): 链 ID
 
+### POST /api/batch-transfer/record
+
+批量转账上链成功后，由 **Next.js**（`/api/batch-transfer/record`）转发到此接口落库；不依赖 indexer。
+
+**请求头（可选）：** 若配置了环境变量 `BACKEND_INTERNAL_SECRET`，需携带 `Authorization: Bearer <secret>`（与根目录 Next 的代理一致）。
+
+**Body：** 与前端 `Transfer` 上报一致，例如 `kind`, `chainId`, `txHash`, `from`, `batchContract`, `tokenType`, `transfers` 等。
+
+### GET /api/batch-transfer/records
+
+查询某地址的批量转账记录（Profile 页使用）。
+
+**查询参数：**
+- `address` (必需): 发送方地址 `0x…`
+- `chainId` (可选): 只查该链；不传则返回该地址在所有链上的记录（最多 100 条）
+
 ### GET /health
 
 健康检查接口。

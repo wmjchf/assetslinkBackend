@@ -6,6 +6,7 @@ import { initTokenLaunchConfigModel } from "./models/TokenLaunchConfig.js";
 import { initTokenLaunchAllocationModel } from "./models/TokenLaunchAllocation.js";
 import { initLpLockRecordModel } from "./models/LpLockRecord.js";
 import { initCommunityUserModel } from "./models/CommunityUser.js";
+import { initBatchTransferRecordModel } from "./models/BatchTransferRecord.js";
 import mysql from "mysql2/promise";
 
 let initialized = false;
@@ -188,6 +189,7 @@ export async function ensureDb() {
   initTokenLaunchAllocationModel();
   initLpLockRecordModel();
   initCommunityUserModel();
+  initBatchTransferRecordModel();
   const sequelize = getSequelize();
   try {
     await sequelize.authenticate();
