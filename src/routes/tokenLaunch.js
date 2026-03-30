@@ -6,98 +6,8 @@ import { TokenLaunchVestingVault } from "../db/models/TokenLaunchVestingVault.js
 import { TokenLaunchAllocation } from "../db/models/TokenLaunchAllocation.js";
 import { buildVaultReleaseCurve } from "../tokenLaunch/releaseCurve.js";
 import { isAddress, createPublicClient, http, decodeEventLog, decodeFunctionData } from "viem";
-import { verifyTokenOnEtherscan, verifyVestingVaultOnEtherscan } from "../etherscan-verify.js";
-
-// ── ABIs ────────────────────────────────────────────────────────────────────
-const TOKEN_FACTORY_EVENTS_ABI = [
-  {
-    type: "event",
-    name: "TokenCreated",
-    inputs: [
-      { indexed: true, name: "creator", type: "address" },
-      { indexed: true, name: "token", type: "address" },
-    ],
-  },
-  {
-    type: "event",
-    name: "VestingCreated",
-    inputs: [
-      { indexed: true, name: "token", type: "address" },
-      { indexed: true, name: "vault", type: "address" },
-      { indexed: true, name: "beneficiary", type: "address" },
-      { indexed: false, name: "amount", type: "uint256" },
-    ],
-  },
-];
-
-const TOKEN_FACTORY_FUNCTIONS_ABI = [
-  {
-    type: "function",
-    name: "createToken",
-    stateMutability: "payable",
-    inputs: [
-      {
-        name: "cfg",
-        type: "tuple",
-        components: [
-          { name: "name", type: "string" },
-          { name: "symbol", type: "string" },
-          { name: "totalSupplyRaw", type: "uint256" },
-        ],
-      },
-    ],
-    outputs: [{ name: "tokenAddr", type: "address" }],
-  },
-  {
-    type: "function",
-    name: "createTokenWithDistribution",
-    stateMutability: "payable",
-    inputs: [
-      {
-        name: "cfg",
-        type: "tuple",
-        components: [
-          { name: "name", type: "string" },
-          { name: "symbol", type: "string" },
-          { name: "totalSupplyRaw", type: "uint256" },
-        ],
-      },
-      { name: "recipients", type: "address[]" },
-      { name: "amounts", type: "uint256[]" },
-    ],
-    outputs: [{ name: "tokenAddr", type: "address" }],
-  },
-  {
-    type: "function",
-    name: "createTokenWithDistributionAndVesting",
-    stateMutability: "payable",
-    inputs: [
-      {
-        name: "cfg",
-        type: "tuple",
-        components: [
-          { name: "name", type: "string" },
-          { name: "symbol", type: "string" },
-          { name: "totalSupplyRaw", type: "uint256" },
-        ],
-      },
-      { name: "recipients", type: "address[]" },
-      { name: "amounts", type: "uint256[]" },
-      {
-        name: "vestings",
-        type: "tuple[]",
-        components: [
-          { name: "beneficiary", type: "address" },
-          { name: "start", type: "uint64" },
-          { name: "cliffSeconds", type: "uint64" },
-          { name: "durationSeconds", type: "uint64" },
-          { name: "amount", type: "uint256" },
-        ],
-      },
-    ],
-    outputs: [{ name: "tokenAddr", type: "address" }],
-  },
-];
+import { verifyTokenOnEtherscan } from "../etherscan-verify.js";
+import { TOKEN_FACTORY_EVENTS_ABI, TOKEN_FACTORY_FUNCTIONS_ABI } from "../tokenLaunch/factoryAbi.js";
 
 function getRpcUrl(chainId) {
   return process.env[`RPC_URL_${chainId}`];
@@ -494,7 +404,7 @@ router.post("/api/token-launch/index-tx", async (req, res) => {
       defaults: { chainId, factoryAddress, creatorAddress: creator, txHash, tokenAddress: token, blockNumber, logIndex },
     });
 
-    // 2. Decode calldata → config, allocations, vestings
+    // 2. Decode calldata → config + allocations
     let decodedFn = null;
     try {
       decodedFn = decodeFunctionData({ abi: TOKEN_FACTORY_FUNCTIONS_ABI, data: tx.input });
@@ -529,14 +439,10 @@ router.post("/api/token-launch/index-tx", async (req, res) => {
         },
       });
 
-      // Allocations
-      const recipients =
-        fn === "createTokenWithDistribution" || fn === "createTokenWithDistributionAndVesting"
-          ? (args?.[1] || []) : [];
-      const amounts =
-        fn === "createTokenWithDistribution" || fn === "createTokenWithDistributionAndVesting"
-          ? (args?.[2] || []) : [];
-      const vestingInputs = fn === "createTokenWithDistributionAndVesting" ? (args?.[3] || []) : [];
+      const recipients = fn === "createTokenWithDistribution" ? (args?.[1] || []) : [];
+      const amounts = fn === "createTokenWithDistribution" ? (args?.[2] || []) : [];
+      const labelsOnChain =
+        fn === "createTokenWithDistribution" && Array.isArray(args?.[3]) ? args[3] : [];
 
       let sum = BigInt(0);
       const allocLabels = Array.isArray(labels.allocations) ? labels.allocations : [];
@@ -545,18 +451,16 @@ router.post("/api/token-launch/index-tx", async (req, res) => {
         const amt = BigInt(String(amounts[i] ?? "0"));
         sum += amt;
         const userLabel = allocLabels.find((l) => Number(l?.allocIndex) === i);
+        const fromChain = normalizeLabel(labelsOnChain[i]);
+        const fromBody = normalizeLabel(userLabel?.label);
         await TokenLaunchAllocation.findOrCreate({
           where: { chainId, txHash, allocIndex: i },
           defaults: {
             chainId, txHash, tokenAddress: token, toAddress: toAddr,
             amount: amt.toString(), allocationType: "immediate", allocIndex: i,
-            label: normalizeLabel(userLabel?.label),
+            label: fromChain ?? fromBody,
           },
         });
-      }
-
-      for (const v of vestingInputs) {
-        sum += BigInt(String(v?.amount ?? "0"));
       }
 
       // Creator remaining
@@ -572,37 +476,6 @@ router.post("/api/token-launch/index-tx", async (req, res) => {
         });
       }
 
-      // Vesting vaults — match VestingCreated events with calldata by order
-      const vestingEvents = decodedEvents
-        .filter((e) => e.decoded?.eventName === "VestingCreated")
-        .sort((a, b) => (Number(a.log.logIndex) || 0) - (Number(b.log.logIndex) || 0));
-
-      const vestLabels = Array.isArray(labels.vestings) ? labels.vestings : [];
-      const n = Math.min(vestingInputs.length, vestingEvents.length);
-      for (let i = 0; i < n; i++) {
-        const vInput = vestingInputs[i] || {};
-        const vEvent = vestingEvents[i].decoded?.args || {};
-        const vault = String(vEvent?.vault || "").toLowerCase();
-        const beneficiary = String(vEvent?.beneficiary || "").toLowerCase();
-        const amount = String(vEvent?.amount || "0");
-        const userVestLabel = vestLabels.find((l) => Number(l?.vestingIndex) === i);
-
-        await TokenLaunchVestingVault.findOrCreate({
-          where: { chainId, txHash, vaultAddress: vault },
-          defaults: {
-            chainId, txHash, tokenAddress: token,
-            vaultAddress: vault, beneficiary, amount,
-            blockNumber: Number(receipt.blockNumber || 0),
-            logIndex: Number(vestingEvents[i].log.logIndex || 0),
-            vestingStart: String(vInput?.start ?? ""),
-            vestingCliffSeconds: String(vInput?.cliffSeconds ?? ""),
-            vestingDurationSeconds: String(vInput?.durationSeconds ?? ""),
-            vestingIndex: i,
-            label: normalizeLabel(userVestLabel?.label),
-          },
-        });
-      }
-
       // Trigger Etherscan verification (non-blocking)
       verifyTokenOnEtherscan(chainId, token, {
         factoryAddress,
@@ -613,27 +486,6 @@ router.post("/api/token-launch/index-tx", async (req, res) => {
       })
         .then((r) => console.log(`[index-tx][verify] token=${token} status=${r.status}${r.message ? " msg=" + r.message : ""}`))
         .catch((e) => console.warn("[index-tx][verify] error:", e?.message || e));
-
-      // Verify each vesting vault (non-blocking, staggered to avoid rate-limiting)
-      for (let i = 0; i < n; i++) {
-        const vInput = vestingInputs[i] || {};
-        const vEvent = vestingEvents[i]?.decoded?.args || {};
-        const vault = String(vEvent?.vault || "").toLowerCase();
-        if (!vault) continue;
-        const delayMs = i * 5_000; // stagger by 5s per vault
-        setTimeout(() => {
-          verifyVestingVaultOnEtherscan(chainId, vault, {
-            tokenAddress: token,
-            beneficiary: String(vEvent?.beneficiary || "").toLowerCase(),
-            start: String(vInput?.start ?? "0"),
-            cliffSeconds: String(vInput?.cliffSeconds ?? "0"),
-            durationSeconds: String(vInput?.durationSeconds ?? "0"),
-            totalAllocation: String(vEvent?.amount ?? "0"),
-          })
-            .then((r) => console.log(`[index-tx][verify] vault=${vault} status=${r.status}${r.message ? " msg=" + r.message : ""}`))
-            .catch((e) => console.warn("[index-tx][verify] vault error:", e?.message || e));
-        }, delayMs);
-      }
     }
 
     res.json({ ok: true, chainId, txHash, tokenAddress: token });

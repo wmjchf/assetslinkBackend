@@ -2,23 +2,63 @@ import hre from "hardhat";
 
 /**
  * BSC nodes return `"to": ""` (empty string) for contract-creation transactions
- * instead of `null`, which causes ethers v6 `waitForDeployment()` to crash.
- * This helper polls `getTransactionReceipt()` directly, which correctly returns
- * `to: null` and avoids the issue.
+ * instead of `null`, which crashes ethers v6 address validation deep inside the
+ * transaction formatter.  This function bypasses all ethers transaction parsing
+ * by using raw JSON-RPC calls, so the quirk never reaches the formatter.
+ *
+ * Steps:
+ *  1. Get the unsigned deploy tx via ContractFactory.getDeployTransaction()
+ *  2. Manually set nonce / gasPrice / chainId
+ *  3. Sign with the deployer signer
+ *  4. Broadcast via `provider.send("eth_sendRawTransaction", ...)`
+ *  5. Poll the receipt via `provider.send("eth_getTransactionReceipt", ...)`
  */
-async function waitForDeploy(contract: any): Promise<string> {
-  const deployTx = contract.deploymentTransaction();
-  if (!deployTx?.hash) {
-    await contract.waitForDeployment();
-    return await contract.getAddress();
-  }
+async function deployRaw(
+  factory: any,
+  deployer: any
+): Promise<{ txHash: string; contractAddress: string; contract: any }> {
   const provider = hre.ethers.provider;
+  const deployerAddr = await deployer.getAddress();
+
+  // 1. Build unsigned tx
+  const deployTxReq = await factory.getDeployTransaction();
+
+  // 2. Populate fields that BSC needs manually
+  //    BSC is a legacy-fee chain (no EIP-1559), use type-0 tx
+  const [nonce, gasPrice, gasEstimate] = await Promise.all([
+    provider.send("eth_getTransactionCount", [deployerAddr, "latest"]),
+    provider.send("eth_gasPrice", []),
+    provider.send("eth_estimateGas", [{ from: deployerAddr, data: deployTxReq.data }]),
+  ]);
+
+  const tx = {
+    type: 0,
+    nonce:    parseInt(nonce, 16),
+    gasPrice: BigInt(gasPrice),
+    gasLimit: BigInt(gasEstimate) + BigInt(50000), // add buffer
+    chainId:  56,
+    data:     deployTxReq.data,
+    value:    BigInt(0),
+    to:       null,
+  };
+
+  // 3. Sign
+  const signedTx = await deployer.signTransaction(tx);
+
+  // 4. Broadcast (raw JSON-RPC — no ethers response parsing)
+  const txHash: string = await provider.send("eth_sendRawTransaction", [signedTx]);
+  console.log("Deploy tx sent:", txHash);
+
+  // 5. Poll receipt (raw JSON-RPC)
   while (true) {
-    const receipt = await provider.getTransactionReceipt(deployTx.hash);
+    const receipt = await provider.send("eth_getTransactionReceipt", [txHash]);
     if (receipt) {
-      if (receipt.status === 0) throw new Error(`Deployment tx ${deployTx.hash} reverted`);
-      if (receipt.contractAddress) return receipt.contractAddress;
-      return await contract.getAddress();
+      if (parseInt(receipt.status, 16) === 0) {
+        throw new Error(`Deploy tx reverted: ${txHash}`);
+      }
+      const contractAddress: string = receipt.contractAddress;
+      const contract = factory.attach(contractAddress);
+      return { txHash, contractAddress, contract };
     }
     await new Promise((r) => setTimeout(r, 3000));
   }
@@ -36,42 +76,41 @@ async function main() {
 
   const network = hre.network;
   const shouldVerify = process.env.VERIFY_CONTRACTS === "true" || process.env.VERIFY_CONTRACTS === "1";
+  const isBsc = network.name === "bsc";
 
-  // Deploy TokenFactory — vesting vaults deployed via `new LinearVestingVault(...)` (no proxy)
+  // Deploy TokenFactory — token + optional distribution only (vesting via VestingTimeLock)
   // @ts-ignore - Hardhat ethers helpers
   const Factory = await hre.ethers.getContractFactory("TokenFactory", deployer);
-  const factory = await Factory.deploy();
-  const factoryAddress = await waitForDeploy(factory);
-  console.log("Deployed TokenFactory:", factoryAddress);
 
-  // Optional: override tiered creation fees (native token, in wei) after deployment.
-  // Defaults set in constructor:
-  //   basicFeeWei        = 0.0001 ether
-  //   distributionFeeWei = 0.001 ether
-  //   vestingFeeWei      = 0.005 ether
-  //
-  // Env examples:
-  //   TOKEN_FACTORY_BASIC_FEE_WEI=100000000000000
-  //   TOKEN_FACTORY_DISTRIBUTION_FEE_WEI=1000000000000000
-  //   TOKEN_FACTORY_VESTING_FEE_WEI=5000000000000000
-  const envBasic        = process.env.TOKEN_FACTORY_BASIC_FEE_WEI?.trim();
-  const envDistribution = process.env.TOKEN_FACTORY_DISTRIBUTION_FEE_WEI?.trim();
-  const envVesting      = process.env.TOKEN_FACTORY_VESTING_FEE_WEI?.trim();
-  if (envBasic || envDistribution || envVesting) {
-    const currentBasic        = (await (factory as any).basicFeeWei()) as bigint;
-    const currentDistribution = (await (factory as any).distributionFeeWei()) as bigint;
-    const currentVesting      = (await (factory as any).vestingFeeWei()) as bigint;
-    const nextBasic        = envBasic        ? BigInt(envBasic)        : currentBasic;
-    const nextDistribution = envDistribution ? BigInt(envDistribution) : currentDistribution;
-    const nextVesting      = envVesting      ? BigInt(envVesting)      : currentVesting;
-    const tx = await (factory as any).setFeesWei(nextBasic, nextDistribution, nextVesting);
-    await tx.wait();
-    console.log("Set feesWei:", {
-      basicFeeWei:        nextBasic.toString(),
-      distributionFeeWei: nextDistribution.toString(),
-      vestingFeeWei:      nextVesting.toString(),
-    });
+  let factory: any;
+  let factoryAddress: string;
+
+  if (isBsc) {
+    // BSC quirk: use raw deployment to bypass ethers v6 "to"="" parser crash
+    const result = await deployRaw(Factory, deployer);
+    factory = result.contract;
+    factoryAddress = result.contractAddress;
+  } else {
+    factory = await Factory.deploy();
+    const deployTx = factory.deploymentTransaction();
+    if (!deployTx?.hash) {
+      await factory.waitForDeployment();
+      factoryAddress = await factory.getAddress();
+    } else {
+      const provider = hre.ethers.provider;
+      while (true) {
+        const receipt = await provider.getTransactionReceipt(deployTx.hash);
+        if (receipt) {
+          if (receipt.status === 0) throw new Error(`Deploy tx ${deployTx.hash} reverted`);
+          factoryAddress = receipt.contractAddress ?? await factory.getAddress();
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
   }
+
+  console.log("Deployed TokenFactory:", factoryAddress);
 
   // Verify contracts on block explorer (if enabled and API key is configured)
   if (shouldVerify) {
@@ -96,16 +135,7 @@ async function main() {
         }
       }
 
-      // Verify LinearVestingVault source (once verified, all vault instances deployed by the
-      // factory are auto-matched on Etherscan via bytecode match)
-      try {
-        console.log("Verifying LinearVestingVault source (bytecode-match template)...");
-        // LinearVestingVault is deployed inline by the factory; use its actual address from
-        // a real vault deployment or simply register the source here with a dummy call.
-        console.log("  Note: deploy a token with vesting first, then verify the vault address.");
-      } catch {
-        // non-fatal
-      }
+      console.log("  Vesting: deploy VestingTimeLock + verify; see deploy-vesting-timelock.ts.");
     } catch (error: any) {
       console.warn("⚠ Contract verification failed:", error.message);
       console.log("You can verify manually later using:");

@@ -1,7 +1,7 @@
 /**
  * Etherscan source-code verification for SafeLaunchToken and LinearVestingVault.
  *
- * Called after each TokenCreated / VestingCreated event.
+ * Called after TokenCreated (factory). LinearVestingVault verification is optional elsewhere.
  * Submits the Standard JSON Input (from hardhat build-info) + ABI-encoded
  * constructor args to Etherscan's verifysourcecode API.
  */

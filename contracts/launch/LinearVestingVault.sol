@@ -11,11 +11,19 @@ pragma solidity ^0.8.28;
  * - cliffSeconds: nothing is claimable before start + cliffSeconds
  * - durationSeconds: total time from start to fully vested (must be >= cliffSeconds)
  *   - linear vesting starts after the cliff and lasts (durationSeconds - cliffSeconds)
+ *
+ * Security (aligned with LPTimeLock-style patterns):
+ * - SafeERC20 for release transfers (non-standard ERC20 return values)
+ * - nonReentrant on release (ERC777 / malicious token hooks re-entry)
  */
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
-contract LinearVestingVault {
+contract LinearVestingVault is ReentrancyGuard {
+  using SafeERC20 for IERC20;
+
   IERC20 public immutable token;
   address public immutable beneficiary;
   uint64 public immutable start;
@@ -69,13 +77,12 @@ contract LinearVestingVault {
     return vested - released;
   }
 
-  function release() external {
+  function release() external nonReentrant {
     require(msg.sender == beneficiary, "not beneficiary");
     uint256 amount = releasable();
     require(amount > 0, "nothing to release");
     released += amount;
-    bool ok = token.transfer(beneficiary, amount);
-    require(ok, "transfer failed");
+    token.safeTransfer(beneficiary, amount);
     emit Released(amount);
   }
 }

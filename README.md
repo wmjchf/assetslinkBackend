@@ -92,6 +92,8 @@ pnpm indexer
 - `INDEXER_POLL_MS` (可选) - 轮询间隔（毫秒，默认 5000）
 - `INDEXER_BATCH_BLOCKS` (可选) - 每批处理的区块数（默认 2000）
 
+索引器与 `index-tx` 仅解码当前工厂的 `createToken` / `createTokenWithDistribution`（瘦 `TokenConfig`）。`token_launch_vesting_vaults` 等表与相关 API 仍保留，发币流程不再写入 vesting 行。
+
 **注意：** 每条链的索引器需要独立运行，可以在不同的终端或使用进程管理器（如 PM2）同时运行多个索引器。
 
 ## API 接口

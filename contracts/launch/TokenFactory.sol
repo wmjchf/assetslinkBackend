@@ -4,7 +4,8 @@ pragma solidity ^0.8.28;
 /**
  * TokenFactory
  *
- * Deploys SafeLaunchToken and LinearVestingVault instances via `new` (no proxy / no clone).
+ * Deploys SafeLaunchToken instances via `new` (no proxy / no clone).
+ * Vesting was removed from this factory — use VestingTimeLock (shared contract) for standalone linear vesting.
  *
  * Why `new` instead of Clones (EIP-1167)?
  * - EIP-1167 creates a minimal proxy whose bytecode only delegates to the
@@ -15,40 +16,26 @@ pragma solidity ^0.8.28;
  *   Etherscan matches the identical deployed bytecode to the verified source.
  *   Result: is_proxy = 0, is_open_source = 1.
  *
- * ABI-compatible with previous factory:
- *   - TokenConfig still has `fees` (6 BPS sub-fields) and `limits` structs.
- *   - `limits` is accepted for ABI compatibility but not applied (token has no limits).
- *   - Buy/sell fee totals are derived by summing the 3 BPS sub-fields each.
+ * TokenConfig is minimal: name, symbol, totalSupplyRaw.
+ * Creation is free (no native-token fees).
+ * Distribution rows include optional labels (emitted in TokenDistributed, max 64 bytes each).
  */
 
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import "./SafeLaunchToken.sol";
-import "./LinearVestingVault.sol";
 
-contract TokenFactory is ReentrancyGuard {
+contract TokenFactory {
   using SafeERC20 for IERC20;
 
+  uint256 public constant MAX_DISTRIBUTION_LABEL_BYTES = 64;
+
   event TokenCreated(address indexed creator, address indexed token);
-  event TokenDistributed(address indexed token, address indexed to, uint256 amount);
-  event VestingCreated(address indexed token, address indexed vault, address indexed beneficiary, uint256 amount);
+  event TokenDistributed(address indexed token, address indexed to, uint256 amount, string label);
   event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
-  event FeesUpdated(
-    uint256 oldBasicFeeWei,
-    uint256 oldDistributionFeeWei,
-    uint256 oldVestingFeeWei,
-    uint256 newBasicFeeWei,
-    uint256 newDistributionFeeWei,
-    uint256 newVestingFeeWei
-  );
-  event FeesWithdrawn(address indexed to, uint256 amountWei);
 
   address public owner;
-  uint256 public basicFeeWei;         // createToken
-  uint256 public distributionFeeWei;  // createTokenWithDistribution
-  uint256 public vestingFeeWei;       // createTokenWithDistributionAndVesting
 
   modifier onlyOwner() {
     require(msg.sender == owner, "not owner");
@@ -58,10 +45,6 @@ contract TokenFactory is ReentrancyGuard {
   constructor() {
     owner = msg.sender;
     emit OwnershipTransferred(address(0), msg.sender);
-
-    basicFeeWei        = 0.0001 ether;
-    distributionFeeWei = 0.001 ether;
-    vestingFeeWei      = 0.005 ether;
   }
 
   function transferOwnership(address newOwner) external onlyOwner {
@@ -69,44 +52,6 @@ contract TokenFactory is ReentrancyGuard {
     address prev = owner;
     owner = newOwner;
     emit OwnershipTransferred(prev, newOwner);
-  }
-
-  function setFeesWei(
-    uint256 newBasicFeeWei,
-    uint256 newDistributionFeeWei,
-    uint256 newVestingFeeWei
-  ) external onlyOwner {
-    require(newBasicFeeWei        <= 1 ether, "basic fee too high");
-    require(newDistributionFeeWei <= 1 ether, "distribution fee too high");
-    require(newVestingFeeWei      <= 1 ether, "vesting fee too high");
-
-    uint256 oldBasic        = basicFeeWei;
-    uint256 oldDistribution = distributionFeeWei;
-    uint256 oldVesting      = vestingFeeWei;
-
-    basicFeeWei        = newBasicFeeWei;
-    distributionFeeWei = newDistributionFeeWei;
-    vestingFeeWei      = newVestingFeeWei;
-
-    emit FeesUpdated(oldBasic, oldDistribution, oldVesting, newBasicFeeWei, newDistributionFeeWei, newVestingFeeWei);
-  }
-
-  function withdrawFees(address payable to, uint256 amountWei) external onlyOwner nonReentrant {
-    if (to == address(0)) to = payable(owner);
-    uint256 amount = amountWei == 0 ? address(this).balance : amountWei;
-    require(amount <= address(this).balance, "insufficient balance");
-
-    emit FeesWithdrawn(to, amount);
-    (bool ok, ) = to.call{ value: amount }("");
-    require(ok, "withdraw failed");
-  }
-
-  function _requireFeePaid(uint256 feeWei) private view {
-    if (feeWei == 0) {
-      require(msg.value == 0, "no fee required");
-    } else {
-      require(msg.value == feeWei, "bad fee");
-    }
   }
 
   // ---------------------------------------------------------------------------
@@ -117,14 +62,6 @@ contract TokenFactory is ReentrancyGuard {
     string  name;
     string  symbol;
     uint256 totalSupplyRaw;
-  }
-
-  struct Vesting {
-    address beneficiary;
-    uint64  start;
-    uint64  cliffSeconds;
-    uint64  durationSeconds;
-    uint256 amount;
   }
 
   // ---------------------------------------------------------------------------
@@ -143,18 +80,6 @@ contract TokenFactory is ReentrancyGuard {
     tokenAddr = address(token);
   }
 
-  function _deployVesting(address tokenAddr, Vesting calldata v) private returns (address vaultAddr) {
-    LinearVestingVault vault = new LinearVestingVault(
-      tokenAddr,
-      v.beneficiary,
-      v.start,
-      v.cliffSeconds,
-      v.durationSeconds,
-      v.amount
-    );
-    vaultAddr = address(vault);
-  }
-
   function _validateRecipientsAndSum(
     uint256 totalSupplyRaw,
     address[] calldata recipients,
@@ -171,21 +96,14 @@ contract TokenFactory is ReentrancyGuard {
     require(sum <= totalSupplyRaw, "distribution > supply");
   }
 
-  function _validateRecipientsVestingsAndSum(
-    uint256 totalSupplyRaw,
-    address[] calldata recipients,
-    uint256[] calldata amounts,
-    Vesting[] calldata vestings
-  ) private pure returns (uint256 sum) {
-    sum = _validateRecipientsAndSum(totalSupplyRaw, recipients, amounts);
-    require(vestings.length <= 50, "too many vestings");
-    for (uint256 j = 0; j < vestings.length; j++) {
-      Vesting calldata v = vestings[j];
-      require(v.beneficiary != address(0), "beneficiary=0");
-      require(v.amount > 0, "vesting amount=0");
-      sum += v.amount;
+  function _validateDistributionLabels(
+    uint256 recipientCount,
+    string[] calldata labels
+  ) private pure {
+    require(labels.length == recipientCount, "labels length");
+    for (uint256 i = 0; i < labels.length; i++) {
+      require(bytes(labels[i]).length <= MAX_DISTRIBUTION_LABEL_BYTES, "label too long");
     }
-    require(sum <= totalSupplyRaw, "distribution > supply");
   }
 
   // ---------------------------------------------------------------------------
@@ -195,8 +113,7 @@ contract TokenFactory is ReentrancyGuard {
   /**
    * Deploy a bare token. All supply goes to msg.sender.
    */
-  function createToken(TokenConfig calldata cfg) external payable returns (address tokenAddr) {
-    _requireFeePaid(basicFeeWei);
+  function createToken(TokenConfig calldata cfg) external returns (address tokenAddr) {
     require(cfg.totalSupplyRaw > 0, "supply=0");
 
     SafeLaunchToken token;
@@ -215,15 +132,17 @@ contract TokenFactory is ReentrancyGuard {
   /**
    * Deploy token and distribute initial supply to multiple recipients.
    * Remaining supply (after recipients) goes to msg.sender.
+   * @param labels one per recipient (same order); use "" when no label; emitted in TokenDistributed.
    */
   function createTokenWithDistribution(
     TokenConfig calldata cfg,
     address[] calldata recipients,
-    uint256[] calldata amounts
-  ) external payable returns (address tokenAddr) {
-    _requireFeePaid(distributionFeeWei);
+    uint256[] calldata amounts,
+    string[] calldata labels
+  ) external returns (address tokenAddr) {
     require(cfg.totalSupplyRaw > 0, "supply=0");
     _validateRecipientsAndSum(cfg.totalSupplyRaw, recipients, amounts);
+    _validateDistributionLabels(recipients.length, labels);
 
     SafeLaunchToken token;
     (token, tokenAddr) = _deployToken(cfg);
@@ -232,54 +151,13 @@ contract TokenFactory is ReentrancyGuard {
       uint256 amt = amounts[i];
       if (amt == 0) continue;
       IERC20(tokenAddr).safeTransfer(recipients[i], amt);
-      emit TokenDistributed(tokenAddr, recipients[i], amt);
+      emit TokenDistributed(tokenAddr, recipients[i], amt, labels[i]);
     }
 
     uint256 remaining = token.balanceOf(address(this));
     if (remaining > 0) {
       IERC20(tokenAddr).safeTransfer(msg.sender, remaining);
-      emit TokenDistributed(tokenAddr, msg.sender, remaining);
-    }
-
-    token.transferOwnership(msg.sender);
-    emit TokenCreated(msg.sender, tokenAddr);
-  }
-
-  /**
-   * Deploy token, distribute some immediately, and vest the rest via
-   * LinearVestingVault clones. Remaining supply goes to msg.sender.
-   */
-  function createTokenWithDistributionAndVesting(
-    TokenConfig calldata cfg,
-    address[] calldata recipients,
-    uint256[] calldata amounts,
-    Vesting[] calldata vestings
-  ) external payable returns (address tokenAddr) {
-    _requireFeePaid(vestingFeeWei);
-    require(cfg.totalSupplyRaw > 0, "supply=0");
-    _validateRecipientsVestingsAndSum(cfg.totalSupplyRaw, recipients, amounts, vestings);
-
-    SafeLaunchToken token;
-    (token, tokenAddr) = _deployToken(cfg);
-
-    for (uint256 i = 0; i < recipients.length; i++) {
-      uint256 amt = amounts[i];
-      if (amt == 0) continue;
-      IERC20(tokenAddr).safeTransfer(recipients[i], amt);
-      emit TokenDistributed(tokenAddr, recipients[i], amt);
-    }
-
-    for (uint256 j = 0; j < vestings.length; j++) {
-      Vesting calldata v = vestings[j];
-      address vaultAddr = _deployVesting(tokenAddr, v);
-      IERC20(tokenAddr).safeTransfer(vaultAddr, v.amount);
-      emit VestingCreated(tokenAddr, vaultAddr, v.beneficiary, v.amount);
-    }
-
-    uint256 remaining = token.balanceOf(address(this));
-    if (remaining > 0) {
-      IERC20(tokenAddr).safeTransfer(msg.sender, remaining);
-      emit TokenDistributed(tokenAddr, msg.sender, remaining);
+      emit TokenDistributed(tokenAddr, msg.sender, remaining, "");
     }
 
     token.transferOwnership(msg.sender);

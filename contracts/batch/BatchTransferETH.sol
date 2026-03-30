@@ -11,6 +11,9 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
  * @notice Batch send native token (ETH/BNB/...) or ERC20 tokens to multiple addresses.
  *         Fee is charged in native token (ETH/BNB): perAddressFee per successful transfer.
  *         No referral or commission mechanism.
+ * @dev Per-item success/failure: use events — `TransferDetail` only on failure (see `batchIndex`), plus
+ *      `BatchNativeTransfer` / `BatchTokenTransfer` for aggregate counts. Excess native (failed amounts +
+ *      overpaid fee) is sent back to `msg.sender` in the same transaction (no pending balance / withdraw).
  */
 contract BatchTransferETH is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -20,13 +23,6 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
     struct Transfer {
         address to;
         uint256 amount;
-    }
-
-    struct TransferResult {
-        address to;
-        uint256 amount;
-        bool success;
-        string failureReason;
     }
 
     // ─── State ──────────────────────────────────────────────────────────────────
@@ -39,9 +35,6 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
     /// @notice Max transfers per batch (native / ERC20).
     uint256 public maxNativeBatchSize;
     uint256 public maxErc20BatchSize;
-
-    /// @notice Pending native-token refunds for failed transfers / excess fee.
-    mapping(address => uint256) public pendingWithdrawals;
 
     // ─── Events ─────────────────────────────────────────────────────────────────
 
@@ -57,16 +50,13 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
         uint256 successCount,
         uint256 failureCount
     );
+    /// @notice Emitted only when a single recipient transfer fails (no event on success — saves gas).
     event TransferDetail(
         address indexed sender,
         uint256 indexed batchIndex,
         address to,
-        uint256 amount,
-        bool success,
-        string failureReason
+        uint256 amount
     );
-    event WithdrawalSuccess(address indexed user, uint256 amount);
-    event BalanceAdded(address indexed user, uint256 amount, string reason);
     event FeeCollectorUpdated(address indexed oldCollector, address indexed newCollector);
     event FeeConfigUpdated(uint256 perAddressFee);
     event MaxNativeBatchSizeUpdated(uint256 oldSize, uint256 newSize);
@@ -92,10 +82,6 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
         return perAddressFee;
     }
 
-    function getPendingWithdrawal(address user) external view returns (uint256) {
-        return pendingWithdrawals[user];
-    }
-
     function getMaxNativeBatchSize() external view returns (uint256) {
         return maxNativeBatchSize;
     }
@@ -106,14 +92,9 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
 
     // ─── Core: batch native transfer ─────────────────────────────────────────────
 
-    function _doSingleNativeTransfer(
-        address to,
-        uint256 amount
-    ) internal returns (bool ok, string memory reason) {
-        (bool success, bytes memory errData) = to.call{ value: amount }("");
-        if (success) return (true, "");
-        reason = errData.length >= 68 ? _extractRevertReason(errData) : "Transfer failed";
-        return (false, reason);
+    function _doSingleNativeTransfer(address to, uint256 amount) internal returns (bool) {
+        (bool success, ) = to.call{ value: amount }("");
+        return success;
     }
 
     /**
@@ -121,9 +102,7 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
      *         msg.value MUST equal totalAmount + fee (fee = perAddressFee × addressCount, excess refunded).
      *         Fee is paid in native token from msg.value.
      */
-    function batchTransferNative(
-        Transfer[] calldata transfers
-    ) external payable returns (TransferResult[] memory results) {
+    function batchTransferNative(Transfer[] calldata transfers) external payable nonReentrant {
         uint256 count = transfers.length;
         require(count > 0, "Empty transfers");
         require(count <= maxNativeBatchSize, "Batch too large");
@@ -135,34 +114,30 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
         uint256 maxFee = perAddressFee * count;
         require(msg.value >= totalAmount + maxFee, "Insufficient value (amount + fee)");
 
-        results = new TransferResult[](count);
         uint256 successCount;
         uint256 refundAmount;
 
         for (uint256 i; i < count; ++i) {
-            (bool ok, string memory reason) = _doSingleNativeTransfer(
-                transfers[i].to, transfers[i].amount
-            );
+            bool ok = _doSingleNativeTransfer(transfers[i].to, transfers[i].amount);
             if (!ok) {
                 refundAmount += transfers[i].amount;
+                emit TransferDetail(msg.sender, i, transfers[i].to, transfers[i].amount);
             } else {
                 ++successCount;
             }
-            results[i] = TransferResult(transfers[i].to, transfers[i].amount, ok, reason);
-            emit TransferDetail(msg.sender, i, transfers[i].to, transfers[i].amount, ok, reason);
         }
 
         uint256 failureCount = count - successCount;
         uint256 actualFee = perAddressFee * successCount;
         uint256 surplus = msg.value - totalAmount;
         uint256 refundTotal = refundAmount + (surplus - actualFee);
-        if (refundTotal > 0) {
-            pendingWithdrawals[msg.sender] += refundTotal;
-            emit BalanceAdded(msg.sender, refundTotal, "refund");
-        }
         if (actualFee > 0) {
-            (bool sent, ) = feeCollector.call{value: actualFee}("");
-            require(sent, "Fee transfer failed");
+            (bool feeSent, ) = feeCollector.call{value: actualFee}("");
+            require(feeSent, "Fee transfer failed");
+        }
+        if (refundTotal > 0) {
+            (bool refSent, ) = msg.sender.call{value: refundTotal}("");
+            require(refSent, "Refund transfer failed");
         }
 
         emit BatchNativeTransfer(msg.sender, successCount, failureCount, refundAmount);
@@ -190,20 +165,15 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
         address token,
         address to,
         uint256 amount
-    ) internal returns (bool ok, string memory reason) {
+    ) internal returns (bool) {
         try IERC20(token).transferFrom(msg.sender, to, amount) {
-            return (true, "");
-        } catch Error(string memory r) {
-            return (false, r);
+            return true;
         } catch {
-            return (false, "Unknown error");
+            return false;
         }
     }
 
-    function batchTransferToken(
-        address token,
-        Transfer[] calldata transfers
-    ) external payable returns (TransferResult[] memory results) {
+    function batchTransferToken(address token, Transfer[] calldata transfers) external payable nonReentrant {
         uint256 count = transfers.length;
         require(count > 0, "Empty transfers");
         require(count <= maxErc20BatchSize, "Batch too large");
@@ -217,18 +187,17 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
         uint256 maxFee = perAddressFee * count;
         require(msg.value >= maxFee, "Insufficient native for fee");
 
-        results = new TransferResult[](count);
         uint256 successCount;
         uint256 failureCount;
 
         for (uint256 i; i < count; ++i) {
-            (bool ok, string memory reason) = _doSingleTokenTransfer(
-                token, transfers[i].to, transfers[i].amount
-            );
-            if (ok) ++successCount; else ++failureCount;
-
-            results[i] = TransferResult(transfers[i].to, transfers[i].amount, ok, reason);
-            emit TransferDetail(msg.sender, i, transfers[i].to, transfers[i].amount, ok, reason);
+            bool ok = _doSingleTokenTransfer(token, transfers[i].to, transfers[i].amount);
+            if (ok) {
+                ++successCount;
+            } else {
+                ++failureCount;
+                emit TransferDetail(msg.sender, i, transfers[i].to, transfers[i].amount);
+            }
         }
 
         emit BatchTokenTransfer(msg.sender, token, successCount, failureCount);
@@ -240,20 +209,9 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
         }
         uint256 refundFee = msg.value - actualFee;
         if (refundFee > 0) {
-            pendingWithdrawals[msg.sender] += refundFee;
-            emit BalanceAdded(msg.sender, refundFee, "fee_refund");
+            (bool refSent, ) = msg.sender.call{value: refundFee}("");
+            require(refSent, "Fee refund transfer failed");
         }
-    }
-
-    // ─── Withdraw failed-transfer refunds ────────────────────────────────────────
-
-    function withdraw() external nonReentrant {
-        uint256 amount = pendingWithdrawals[msg.sender];
-        require(amount > 0, "Nothing to withdraw");
-        pendingWithdrawals[msg.sender] = 0;
-        (bool ok, ) = msg.sender.call{value: amount}("");
-        require(ok, "Withdraw failed");
-        emit WithdrawalSuccess(msg.sender, amount);
     }
 
     // ─── Admin ───────────────────────────────────────────────────────────────────
@@ -279,16 +237,6 @@ contract BatchTransferETH is Ownable, ReentrancyGuard {
         require(_maxErc20BatchSize > 0, "Invalid size");
         emit MaxErc20BatchSizeUpdated(maxErc20BatchSize, _maxErc20BatchSize);
         maxErc20BatchSize = _maxErc20BatchSize;
-    }
-
-    // ─── Internal ────────────────────────────────────────────────────────────────
-
-    function _extractRevertReason(bytes memory data) internal pure returns (string memory) {
-        if (data.length < 68) return "Unknown revert";
-        assembly {
-            data := add(data, 0x04)
-        }
-        return abi.decode(data, (string));
     }
 
     receive() external payable {}

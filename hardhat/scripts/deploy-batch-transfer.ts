@@ -35,10 +35,20 @@ async function main() {
 
   if (envPerAddressFee) {
     const paf = BigInt(envPerAddressFee);
-    // @ts-ignore
-    const tx = await (contract as any).setFeeConfig(paf);
-    await tx.wait();
-    console.log("✓ setFeeConfig   perAddressFee =", paf.toString(), "wei");
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const c = await hre.ethers.getContractAt("BatchTransferETH", contractAddress);
+        const tx = await c.setFeeConfig(paf);
+        await tx.wait();
+        console.log("✓ setFeeConfig   perAddressFee =", paf.toString(), "wei");
+        break;
+      } catch (e) {
+        if (attempt === maxAttempts) throw e;
+        console.warn(`  setFeeConfig attempt ${attempt} failed, retrying in 3s...`);
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
   } else {
     console.log("  setFeeConfig skipped (no BATCH_PER_ADDRESS_FEE)");
   }
