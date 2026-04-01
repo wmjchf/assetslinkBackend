@@ -1,4 +1,5 @@
 import express from "express";
+import { Op } from "sequelize";
 import { ensureDb } from "../db/init.js";
 import { TokenLaunchRecord } from "../db/models/TokenLaunchRecord.js";
 import { TokenLaunchConfig } from "../db/models/TokenLaunchConfig.js";
@@ -96,6 +97,62 @@ router.get("/api/token-launch/my-token", async (req, res) => {
     const msg = e?.message || String(e);
     res.status(500).json({
       error: `Failed to load data from server. Please try again later. (Debug: ${msg})`,
+      records: [],
+    });
+  }
+});
+
+// GET /api/token-launch/recent — latest indexed launches (public, for homepage)
+router.get("/api/token-launch/recent", async (req, res) => {
+  const limitRaw = Number(req.query.limit || 20);
+  const limit = Math.min(50, Math.max(1, Number.isFinite(limitRaw) ? Math.floor(limitRaw) : 20));
+
+  try {
+    await ensureDb();
+
+    const rows = await TokenLaunchRecord.findAll({
+      order: [["createdAt", "DESC"]],
+      limit,
+    });
+
+    if (!rows.length) {
+      res.json({ error: null, records: [] });
+      return;
+    }
+
+    const orClause = rows.map((r) => ({
+      chainId: r.chainId,
+      txHash: String(r.txHash).toLowerCase(),
+    }));
+
+    const cfgRows = await TokenLaunchConfig.findAll({
+      where: { [Op.or]: orClause },
+    });
+
+    const cfgByKey = new Map();
+    for (const c of cfgRows) {
+      const k = `${c.chainId}:${String(c.txHash).toLowerCase()}`;
+      cfgByKey.set(k, { name: String(c.name), symbol: String(c.symbol) });
+    }
+
+    const records = rows.map((r) => {
+      const k = `${r.chainId}:${String(r.txHash).toLowerCase()}`;
+      const cfg = cfgByKey.get(k) || null;
+      return {
+        id: String(r.id),
+        chainId: r.chainId,
+        txHash: String(r.txHash),
+        tokenAddress: String(r.tokenAddress),
+        createdAt: new Date(r.createdAt).getTime(),
+        config: cfg,
+      };
+    });
+
+    res.json({ error: null, records });
+  } catch (e) {
+    console.error("Failed to load recent token launches", e);
+    res.status(500).json({
+      error: e?.message || "Internal server error",
       records: [],
     });
   }

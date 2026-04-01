@@ -5,6 +5,7 @@ import lpLockRouter from "./routes/lpLock.js";
 import communityInternalRouter from "./routes/communityInternal.js";
 import batchTransferRouter from "./routes/batchTransfer.js";
 import vestingLockRouter from "./routes/vestingLock.js";
+import airdropRouter from "./routes/airdrop.js";
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -29,6 +30,7 @@ app.use(lpLockRouter);
 app.use(communityInternalRouter);
 app.use(batchTransferRouter);
 app.use(vestingLockRouter);
+app.use(airdropRouter);
 
 // Health check
 app.get("/health", (req, res) => {

@@ -8,6 +8,8 @@ import { initLpLockRecordModel } from "./models/LpLockRecord.js";
 import { initCommunityUserModel } from "./models/CommunityUser.js";
 import { initBatchTransferRecordModel } from "./models/BatchTransferRecord.js";
 import { initVestingLockRecordModel } from "./models/VestingLockRecord.js";
+import { initAirdropRoundRecordModel } from "./models/AirdropRoundRecord.js";
+import { initAirdropFundRecordModel } from "./models/AirdropFundRecord.js";
 import mysql from "mysql2/promise";
 
 let initialized = false;
@@ -219,6 +221,8 @@ export async function ensureDb() {
   initCommunityUserModel();
   initBatchTransferRecordModel();
   initVestingLockRecordModel();
+  initAirdropRoundRecordModel();
+  initAirdropFundRecordModel();
   const sequelize = getSequelize();
   try {
     await sequelize.authenticate();
