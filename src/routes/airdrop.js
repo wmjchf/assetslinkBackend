@@ -215,6 +215,44 @@ router.get("/api/airdrop/merkle-claims", async (req, res) => {
   }
 });
 
+router.get("/api/airdrop/by-token", async (req, res) => {
+  try {
+    await ensureDb();
+    const chainId = Number(req.query.chainId || 0);
+    const tokenAddress = normalizeAddress(req.query.tokenAddress);
+    if (!chainId || !tokenAddress.startsWith("0x")) {
+      return res.status(400).json({ error: "Invalid chainId or tokenAddress" });
+    }
+
+    const rows = await AirdropRoundRecord.findAll({
+      where: { chainId, tokenAddress },
+      order: [["id", "DESC"]],
+      limit: 200,
+    });
+    return res.json({
+      records: rows.map((r) => ({
+        id: String(r.id),
+        chainId: r.chainId,
+        roundId: String(r.roundId),
+        distributorAddress: String(r.distributorAddress),
+        ownerAddress: String(r.ownerAddress),
+        tokenAddress: String(r.tokenAddress),
+        merkleRoot: String(r.merkleRoot),
+        startAt: Number(r.startAt),
+        endAt: Number(r.endAt),
+        totalAmount: String(r.totalAmount),
+        createTxHash: String(r.createTxHash),
+        status: String(r.status),
+        roundName: r.roundName != null ? String(r.roundName) : null,
+        createdAt: r.createdAt,
+      })),
+    });
+  } catch (e) {
+    console.error("[airdrop/by-token]", e);
+    return res.status(500).json({ error: e?.message || "Internal error" });
+  }
+});
+
 router.get("/api/airdrop/my-rounds", async (req, res) => {
   try {
     await ensureDb();
