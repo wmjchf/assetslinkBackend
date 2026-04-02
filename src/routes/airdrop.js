@@ -25,6 +25,8 @@ router.post("/api/airdrop/index-round", async (req, res) => {
     const totalAmount = String(body.totalAmount || "");
     const createTxHash = normalizeAddress(body.createTxHash);
     const blockNumber = body.blockNumber != null ? Number(body.blockNumber) : null;
+    const roundNameRaw = typeof body.roundName === "string" ? body.roundName.trim().slice(0, 200) : "";
+    const roundName = roundNameRaw || null;
 
     if (
       !chainId ||
@@ -56,8 +58,14 @@ router.post("/api/airdrop/index-round", async (req, res) => {
         createTxHash,
         blockNumber,
         status: "created",
+        roundName,
       },
     });
+
+    if (roundName != null) {
+      record.roundName = roundName;
+      await record.save();
+    }
 
     const merkleClaims = body.merkleClaims;
     if (merkleClaims && typeof merkleClaims === "object" && merkleClaims !== null) {
@@ -162,6 +170,7 @@ router.get("/api/airdrop/round", async (req, res) => {
         createTxHash: String(round.createTxHash),
         blockNumber: round.blockNumber != null ? Number(round.blockNumber) : null,
         status: String(round.status),
+        roundName: round.roundName != null ? String(round.roundName) : null,
         createdAt: round.createdAt,
       },
       funds: funds.map((f) => ({
@@ -235,6 +244,7 @@ router.get("/api/airdrop/my-rounds", async (req, res) => {
         totalAmount: String(r.totalAmount),
         createTxHash: String(r.createTxHash),
         status: String(r.status),
+        roundName: r.roundName != null ? String(r.roundName) : null,
         createdAt: r.createdAt,
       })),
     });

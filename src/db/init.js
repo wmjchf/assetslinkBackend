@@ -209,6 +209,32 @@ async function ensureAirdropRoundClaimsJsonColumn() {
   }
 }
 
+async function ensureAirdropRoundRoundNameColumn() {
+  const info = getMysqlInfo();
+  if (!info.host || !info.user || !info.database) return;
+  const conn = await mysql.createConnection({
+    host: info.host,
+    port: info.port,
+    user: info.user,
+    password: info.password,
+    database: info.database,
+  });
+  try {
+    const [rows] = await conn.query(
+      `SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'airdrop_round_records' AND COLUMN_NAME = 'roundName'`,
+      [info.database]
+    );
+    if (Number(rows?.[0]?.cnt || 0) === 0) {
+      await conn.query(
+        `ALTER TABLE airdrop_round_records ADD COLUMN roundName VARCHAR(200) NULL`
+      );
+    }
+  } finally {
+    await conn.end();
+  }
+}
+
 async function ensureVestingLockOptionalColumns() {
   const info = getMysqlInfo();
   if (!info.host || !info.user || !info.database) return;
@@ -274,6 +300,7 @@ export async function ensureDb() {
   // Ensure vesting_lock_records columns (sequelize.sync does not ALTER existing tables).
   await ensureVestingLockOptionalColumns();
   await ensureAirdropRoundClaimsJsonColumn();
+  await ensureAirdropRoundRoundNameColumn();
   initialized = true;
 }
 
