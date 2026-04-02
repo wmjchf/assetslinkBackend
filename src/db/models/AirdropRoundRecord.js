@@ -21,6 +21,8 @@ export function initAirdropRoundRecordModel() {
       createTxHash: { type: DataTypes.STRING(66), allowNull: false },
       blockNumber: { type: DataTypes.BIGINT.UNSIGNED, allowNull: true },
       status: { type: DataTypes.STRING(16), allowNull: false, defaultValue: "created" },
+      /** Full Merkle claims payload (same shape as airdrop-claims.json); optional */
+      claimsJson: { type: DataTypes.TEXT("long"), allowNull: true },
     },
     {
       sequelize,

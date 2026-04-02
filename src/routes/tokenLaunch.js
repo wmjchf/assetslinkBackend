@@ -323,6 +323,7 @@ router.get("/api/token-launch/records", async (req, res) => {
         chainId: r.chainId,
         txHash: r.txHash,
         tokenAddress: r.tokenAddress,
+        creatorAddress: String(r.creatorAddress || "").toLowerCase(),
         // backward-compatible: old field still returns vault addresses only
         vestingVaults: (vestingByTx.get(String(r.txHash).toLowerCase()) || []).map((x) => x.vaultAddress),
         // new fields for full detail view

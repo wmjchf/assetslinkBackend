@@ -59,6 +59,15 @@ router.post("/api/airdrop/index-round", async (req, res) => {
       },
     });
 
+    const merkleClaims = body.merkleClaims;
+    if (merkleClaims && typeof merkleClaims === "object" && merkleClaims !== null) {
+      const rootFromClaims = String(merkleClaims.root || "").toLowerCase();
+      if (rootFromClaims && rootFromClaims === merkleRoot.toLowerCase()) {
+        record.claimsJson = JSON.stringify(merkleClaims);
+        await record.save();
+      }
+    }
+
     return res.json({ ok: true, created, id: String(record.id) });
   } catch (e) {
     console.error("[airdrop/index-round]", e);
@@ -166,6 +175,33 @@ router.get("/api/airdrop/round", async (req, res) => {
     });
   } catch (e) {
     console.error("[airdrop/round]", e);
+    return res.status(500).json({ error: e?.message || "Internal error" });
+  }
+});
+
+router.get("/api/airdrop/merkle-claims", async (req, res) => {
+  try {
+    await ensureDb();
+    const chainId = Number(req.query.chainId || 0);
+    const roundId = String(req.query.roundId || "").trim();
+    const distributor = normalizeAddress(req.query.distributor);
+    if (!chainId || !roundId || !distributor.startsWith("0x")) {
+      return res.status(400).json({ error: "Invalid chainId, roundId, or distributor" });
+    }
+    const round = await AirdropRoundRecord.findOne({
+      where: { chainId, distributorAddress: distributor, roundId },
+    });
+    const raw = round?.claimsJson ? String(round.claimsJson).trim() : "";
+    if (!raw) {
+      return res.status(404).json({ error: "Merkle data not found for this round" });
+    }
+    try {
+      return res.json(JSON.parse(raw));
+    } catch {
+      return res.status(500).json({ error: "Invalid stored Merkle JSON" });
+    }
+  } catch (e) {
+    console.error("[airdrop/merkle-claims]", e);
     return res.status(500).json({ error: e?.message || "Internal error" });
   }
 });

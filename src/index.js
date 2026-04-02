@@ -20,8 +20,8 @@ app.use(
   })
 );
 
-// Body parser middleware
-app.use(express.json());
+// Body parser middleware (large JSON for airdrop merkleClaims)
+app.use(express.json({ limit: "12mb" }));
 app.use(express.urlencoded({ extended: true }));
 
 // Routes
