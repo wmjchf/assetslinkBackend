@@ -1,6 +1,7 @@
 import express from "express";
 import { ensureDb } from "../db/init.js";
 import { LpLockRecord } from "../db/models/LpLockRecord.js";
+import { AddLiquidityRecord } from "../db/models/AddLiquidityRecord.js";
 import { isAddress, createPublicClient, http, decodeEventLog } from "viem";
 import { Op } from "sequelize";
 
@@ -253,7 +254,27 @@ router.post("/api/lp-lock/index-tx", async (req, res) => {
       inserted.push({ lockId, created, dbId: String(record.id) });
     }
 
-    res.json({ ok: true, inserted });
+    const lockedLpTokens = [
+      ...new Set(
+        lockEvents.map(({ decoded }) => String(decoded.args.token || "").toLowerCase())
+      ),
+    ].filter((a) => a && a.startsWith("0x"));
+
+    let addLiquidityRowsMarked = 0;
+    for (const lpAddr of lockedLpTokens) {
+      const [n] = await AddLiquidityRecord.update(
+        { lpLocked: true },
+        {
+          where: {
+            chainId,
+            [Op.or]: [{ pairAddress: lpAddr }, { lpTokenAddress: lpAddr }],
+          },
+        }
+      );
+      addLiquidityRowsMarked += Number(n || 0);
+    }
+
+    res.json({ ok: true, inserted, addLiquidityRowsMarked });
   } catch (e) {
     console.error("[lp-lock/index-tx]", e);
     res.status(500).json({ error: e?.message || "Internal error" });

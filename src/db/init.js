@@ -10,6 +10,7 @@ import { initBatchTransferRecordModel } from "./models/BatchTransferRecord.js";
 import { initVestingLockRecordModel } from "./models/VestingLockRecord.js";
 import { initAirdropRoundRecordModel } from "./models/AirdropRoundRecord.js";
 import { initAirdropFundRecordModel } from "./models/AirdropFundRecord.js";
+import { initAddLiquidityRecordModel } from "./models/AddLiquidityRecord.js";
 import mysql from "mysql2/promise";
 
 let initialized = false;
@@ -209,6 +210,32 @@ async function ensureAirdropRoundClaimsJsonColumn() {
   }
 }
 
+async function ensureAddLiquidityLpLockedColumn() {
+  const info = getMysqlInfo();
+  if (!info.host || !info.user || !info.database) return;
+  const conn = await mysql.createConnection({
+    host: info.host,
+    port: info.port,
+    user: info.user,
+    password: info.password,
+    database: info.database,
+  });
+  try {
+    const [rows] = await conn.query(
+      `SELECT COUNT(*) as cnt FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'add_liquidity_records' AND COLUMN_NAME = 'lpLocked'`,
+      [info.database]
+    );
+    if (Number(rows?.[0]?.cnt || 0) === 0) {
+      await conn.query(
+        `ALTER TABLE add_liquidity_records ADD COLUMN lpLocked TINYINT(1) NOT NULL DEFAULT 0`
+      );
+    }
+  } finally {
+    await conn.end();
+  }
+}
+
 async function ensureAirdropRoundRoundNameColumn() {
   const info = getMysqlInfo();
   if (!info.host || !info.user || !info.database) return;
@@ -275,6 +302,7 @@ export async function ensureDb() {
   initVestingLockRecordModel();
   initAirdropRoundRecordModel();
   initAirdropFundRecordModel();
+  initAddLiquidityRecordModel();
   const sequelize = getSequelize();
   try {
     await sequelize.authenticate();
@@ -301,6 +329,7 @@ export async function ensureDb() {
   await ensureVestingLockOptionalColumns();
   await ensureAirdropRoundClaimsJsonColumn();
   await ensureAirdropRoundRoundNameColumn();
+  await ensureAddLiquidityLpLockedColumn();
   initialized = true;
 }
 
