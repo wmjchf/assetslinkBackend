@@ -27,6 +27,8 @@ export function initAddLiquidityRecordModel() {
         { unique: true, fields: ["chainId", "txHash"] },
         { fields: ["chainId", "wallet"] },
         { fields: ["chainId", "tokenAddress"] },
+        { fields: ["chainId", "pairAddress"] },
+        { fields: ["chainId", "lpTokenAddress"] },
       ],
     }
   );

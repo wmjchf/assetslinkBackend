@@ -176,6 +176,50 @@ router.get("/api/add-liquidity/pair-lock-status", async (req, res) => {
 });
 
 /**
+ * GET /api/add-liquidity/record-by-pair?chainId=1&pairAddress=0x...
+ * Project ERC-20 from index-tx (not USDT/WETH). Used by LP lock detail → token launch link.
+ */
+router.get("/api/add-liquidity/record-by-pair", async (req, res) => {
+  const chainId = Number(req.query.chainId || 0);
+  const raw = String(req.query.pairAddress || "").trim().toLowerCase();
+
+  if (!Number.isInteger(chainId) || chainId <= 0) {
+    res.status(400).json({ error: "Invalid chainId" });
+    return;
+  }
+  if (!raw || !viemIsAddress(raw)) {
+    res.status(400).json({ error: "Invalid pairAddress" });
+    return;
+  }
+
+  try {
+    await ensureDb();
+
+    const row = await AddLiquidityRecord.findOne({
+      where: {
+        chainId,
+        [Op.or]: [{ pairAddress: raw }, { lpTokenAddress: raw }],
+      },
+      order: [["id", "DESC"]],
+    });
+
+    if (!row) {
+      res.json({ tokenAddress: null, record: null });
+      return;
+    }
+
+    const tokenAddress = row.tokenAddress;
+    res.json({
+      tokenAddress,
+      record: { tokenAddress },
+    });
+  } catch (e) {
+    console.error("[add-liquidity/record-by-pair]", e);
+    res.status(500).json({ error: e?.message || "Internal error" });
+  }
+});
+
+/**
  * GET /api/add-liquidity/my-records?address=0x...&chainId=1
  */
 router.get("/api/add-liquidity/my-records", async (req, res) => {
