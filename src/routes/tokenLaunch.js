@@ -19,6 +19,17 @@ function normalizeLabel(s) {
   return v ? v.slice(0, 64) : null;
 }
 
+/** Chip text for profile "recipient" rows — matches app vesting/create allocation wording. */
+function allocationDisplayLabelForProfile(label, allocationType) {
+  const custom = normalizeLabel(label);
+  if (custom) return custom;
+  const t = String(allocationType || "");
+  if (t === "creator_remaining") return "Creator remaining";
+  if (t === "immediate") return "Distribution";
+  if (t) return t.replace(/_/g, " ");
+  return "Recipient";
+}
+
 const router = express.Router();
 
 router.get("/api/token-launch/my-token", async (req, res) => {
@@ -71,8 +82,30 @@ router.get("/api/token-launch/my-token", async (req, res) => {
     }
     const allocRows = await TokenLaunchAllocation.findAll({
       where: allocWhere,
-      attributes: ["chainId", "tokenAddress"],
+      attributes: ["chainId", "tokenAddress", "label", "allocationType", "allocIndex"],
     });
+
+    const allocListsByKey = new Map();
+    for (const a of allocRows) {
+      const tok = String(a.tokenAddress).toLowerCase();
+      const key = `${a.chainId}:${tok}`;
+      const disp = allocationDisplayLabelForProfile(a.label, a.allocationType);
+      const list = allocListsByKey.get(key) || [];
+      list.push({ i: Number(a.allocIndex) || 0, disp });
+      allocListsByKey.set(key, list);
+    }
+    const profileAllocLabelByKey = new Map();
+    for (const [key, list] of allocListsByKey) {
+      list.sort((x, y) => x.i - y.i);
+      const seen = new Set();
+      const parts = [];
+      for (const { disp } of list) {
+        if (seen.has(disp)) continue;
+        seen.add(disp);
+        parts.push(disp);
+      }
+      profileAllocLabelByKey.set(key, parts.join(" · "));
+    }
 
     const extraPairs = new Map();
     for (const a of allocRows) {
@@ -118,6 +151,7 @@ router.get("/api/token-launch/my-token", async (req, res) => {
       const txHash = String(r.txHash);
       const cfg = cfgByTx.get(txHash.toLowerCase()) || null;
       const key = `${r.chainId}:${String(r.tokenAddress).toLowerCase()}`;
+      const isCreator = creatorKeySet.has(key);
       return {
         id: String(r.id),
         chainId: r.chainId,
@@ -125,7 +159,8 @@ router.get("/api/token-launch/my-token", async (req, res) => {
         tokenAddress: String(r.tokenAddress),
         createdAt: new Date(r.createdAt).getTime(),
         config: cfg,
-        profileRole: creatorKeySet.has(key) ? "creator" : "recipient",
+        profileRole: isCreator ? "creator" : "recipient",
+        profileAllocationLabel: isCreator ? null : profileAllocLabelByKey.get(key) || null,
       };
     });
 
