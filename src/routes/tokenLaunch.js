@@ -51,11 +51,50 @@ router.get("/api/token-launch/my-token", async (req, res) => {
       whereClause.chainId = chainId;
     }
 
-    const rows = await TokenLaunchRecord.findAll({
+    const creatorRows = await TokenLaunchRecord.findAll({
       where: whereClause,
       order: [["createdAt", "DESC"]],
-      limit: 50,
+      limit: 100,
     });
+
+    const byKey = new Map();
+    const creatorKeySet = new Set();
+    for (const r of creatorRows) {
+      const key = `${r.chainId}:${String(r.tokenAddress).toLowerCase()}`;
+      byKey.set(key, r);
+      creatorKeySet.add(key);
+    }
+
+    const allocWhere = { toAddress: addressLower };
+    if (chainId !== null) {
+      allocWhere.chainId = chainId;
+    }
+    const allocRows = await TokenLaunchAllocation.findAll({
+      where: allocWhere,
+      attributes: ["chainId", "tokenAddress"],
+    });
+
+    const extraPairs = new Map();
+    for (const a of allocRows) {
+      const cid = a.chainId;
+      const tok = String(a.tokenAddress).toLowerCase();
+      const key = `${cid}:${tok}`;
+      if (creatorKeySet.has(key)) continue;
+      extraPairs.set(key, { chainId: cid, tokenAddress: tok });
+    }
+
+    if (extraPairs.size > 0) {
+      const orList = [...extraPairs.values()];
+      const extraRecords = await TokenLaunchRecord.findAll({
+        where: { [Op.or]: orList },
+      });
+      for (const r of extraRecords) {
+        const key = `${r.chainId}:${String(r.tokenAddress).toLowerCase()}`;
+        if (!byKey.has(key)) byKey.set(key, r);
+      }
+    }
+
+    const rows = [...byKey.values()].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 50);
 
     const txHashes = rows.map((r) => String(r.txHash).toLowerCase());
     const cfgWhereClause = { txHash: txHashes };
@@ -78,6 +117,7 @@ router.get("/api/token-launch/my-token", async (req, res) => {
     const records = rows.map((r) => {
       const txHash = String(r.txHash);
       const cfg = cfgByTx.get(txHash.toLowerCase()) || null;
+      const key = `${r.chainId}:${String(r.tokenAddress).toLowerCase()}`;
       return {
         id: String(r.id),
         chainId: r.chainId,
@@ -85,6 +125,7 @@ router.get("/api/token-launch/my-token", async (req, res) => {
         tokenAddress: String(r.tokenAddress),
         createdAt: new Date(r.createdAt).getTime(),
         config: cfg,
+        profileRole: creatorKeySet.has(key) ? "creator" : "recipient",
       };
     });
 
