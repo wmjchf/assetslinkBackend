@@ -178,10 +178,16 @@ router.get("/api/token-launch/my-token", async (req, res) => {
   }
 });
 
-// GET /api/token-launch/recent — latest indexed launches (public, for homepage)
+// GET /api/token-launch/recent — latest indexed launches (public, for homepage / explore pagination)
+// Query: limit (1–50, default 20), offset (skip rows, default 0; newest first)
 router.get("/api/token-launch/recent", async (req, res) => {
   const limitRaw = Number(req.query.limit || 20);
   const limit = Math.min(50, Math.max(1, Number.isFinite(limitRaw) ? Math.floor(limitRaw) : 20));
+  const offsetRaw = Number(req.query.offset ?? 0);
+  const offset = Math.min(
+    5000,
+    Math.max(0, Number.isFinite(offsetRaw) ? Math.floor(offsetRaw) : 0)
+  );
 
   try {
     await ensureDb();
@@ -189,6 +195,7 @@ router.get("/api/token-launch/recent", async (req, res) => {
     const rows = await TokenLaunchRecord.findAll({
       order: [["createdAt", "DESC"]],
       limit,
+      offset,
     });
 
     if (!rows.length) {
